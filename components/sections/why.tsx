@@ -6,7 +6,7 @@ const spans = ["md:col-span-3", "md:col-span-3", "md:col-span-2", "md:col-span-2
 
 export function WhySection() {
   return (
-    <Section aria-labelledby="why-title" className="bg-paper-2/50">
+    <Section tone="muted" aria-labelledby="why-title">
       <Container>
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">

@@ -6,9 +6,9 @@ import { cn } from "@/lib/utils";
 
 const spans = ["lg:col-span-2", "lg:col-span-2", "lg:col-span-2", "lg:col-span-3", "lg:col-span-3"];
 
-export function FormatsSection() {
+export function FormatsSection({ tone }: { tone?: "light" | "muted" }) {
   return (
-    <Section aria-labelledby="formats-title">
+    <Section tone={tone} aria-labelledby="formats-title">
       <Container>
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">

@@ -72,9 +72,13 @@ export function Navbar() {
     <header
       className={cn(
         "on-dark fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-500",
-        solid
-          ? "border-b border-white/[0.07] bg-ink/85 backdrop-blur-xl backdrop-saturate-150"
-          : "border-b border-transparent bg-transparent",
+        // No backdrop-filter while the menu is open: it would become the containing
+        // block for the fixed mobile panel and collapse it to the header's height.
+        open
+          ? "border-b border-white/[0.07] bg-ink"
+          : solid
+            ? "border-b border-white/[0.07] bg-ink/85 backdrop-blur-xl backdrop-saturate-150"
+            : "border-b border-transparent bg-transparent",
       )}
     >
       <a
@@ -116,7 +120,7 @@ export function Navbar() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <ButtonLink href={primaryCta.href} size="md" className="hidden h-10 px-4 text-sm sm:inline-flex">
+          <ButtonLink href={primaryCta.href} size="md" className="h-10 px-4 text-sm max-sm:hidden">
             {primaryCta.label}
           </ButtonLink>
           <button

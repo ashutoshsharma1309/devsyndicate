@@ -1,37 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Dev Syndicate — website
 
-## Getting Started
-
-First, run the development server:
+The public website and lead pipeline for Dev Syndicate, a hackathon partner for colleges.
+Next.js 16 (App Router, Turbopack), React 19, Tailwind CSS 4, TypeScript.
 
 ```bash
+npm install
+cp .env.example .env.local   # optional in development — see below
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Script | |
+| --- | --- |
+| `npm run dev` / `build` / `start` | Next.js |
+| `npm run lint` · `npm run typecheck` | ESLint · TypeScript |
+| `npm run db:setup` | Create the lead tables in `DATABASE_URL` (idempotent) |
+| `npm run admin:hash -- "password"` | Generate `ADMIN_PASSWORD_HASH` |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```text
+app/
+  (site)/            public pages: /, about, how-it-works, services, contact, privacy, terms
+  admin/             protected lead dashboard: /admin, /admin/leads, /admin/leads/[id]
+  api/leads/         contact form endpoint
+  sitemap.ts, robots.ts, opengraph-image.tsx
+components/          hero, sections, process, contact, admin, layout, navigation, footer, ui
+lib/
+  site.ts            company details (single source of truth)
+  content.ts         shared marketing copy
+  validation/lead.ts form schema — shared by the form and the API
+  leads/             lead store: Postgres, or a JSON file in development
+  email/             notification email + provider (SMTP / console)
+  auth/              admin session (jose JWT in an httpOnly cookie)
+proxy.ts             optimistic /admin gate (pages and actions re-check)
+db/schema.sql        lead + notes tables
+```
 
-## Learn More
+## How a request flows
 
-To learn more about Next.js, take a look at the following resources:
+Contact form → client validation → `POST /api/leads` → same-origin check, rate limit (per IP, in memory and
+in the database), honeypot and minimum-fill-time checks → server validation → **stored** → **email
+notification** to `CONTACT_EMAIL` (defaults to dsdevsyndicate@gmail.com), with Reply-To set to the requester.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+If the lead is stored, the email is sent after the response. If storage isn't configured, the email is the
+record and must succeed, or the visitor sees an error with direct contact details.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| | Development | Production |
+| --- | --- | --- |
+| Storage | `.data/leads.json` unless `DATABASE_URL` is set | Postgres via `DATABASE_URL` |
+| Email | printed to the server log unless `SMTP_HOST` is set | SMTP via `SMTP_*` |
 
-## Deploy on Vercel
+Configure **at least one** of `DATABASE_URL` or `SMTP_HOST` in production, ideally both.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Admin
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# devsyndicate
+Set `SESSION_SECRET` (32+ chars) and `ADMIN_PASSWORD_HASH`, then sign in at `/admin/login`. Leads can be
+searched, filtered by status and event type, moved through the pipeline
+(New → Contacted → Meeting Scheduled → Proposal Sent → Negotiation → Won / Lost) and annotated with notes.
+Admin pages are `noindex` and disallowed in robots.txt.
+
+## Editing content
+
+- Company details: `lib/site.ts`. Add real social profiles to `site.social` and the footer shows them.
+- Copy: `lib/content.ts`.
+- **Outcome metrics** (`outcomeMetrics`) have `value: null` until there are verified, cumulative numbers.
+  Set a value and the homepage animates it in. Don't publish estimates.
+- There is no testimonials, partner-logo or events section by design. Add them only with real, permissioned content.

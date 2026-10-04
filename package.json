@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "db:setup": "node --env-file-if-exists=.env.local scripts/db-setup.mjs",
+    "admin:hash": "node scripts/admin-hash.mjs"
   },
   "dependencies": {
     "jose": "^6.2.12",

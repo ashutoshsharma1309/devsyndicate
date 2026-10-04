@@ -11,7 +11,7 @@ function Tick({ className }: { className?: string }) {
 
 export function ResponsibilitySplit() {
   return (
-    <Section aria-labelledby="split-title">
+    <Section tone="muted" aria-labelledby="split-title">
       <Container>
         <div className="max-w-3xl">
           <SectionLabel>Who does what</SectionLabel>
@@ -24,7 +24,7 @@ export function ResponsibilitySplit() {
         </div>
 
         <div className="mt-14 grid overflow-hidden rounded-md border border-line md:mt-20 md:grid-cols-[5fr_7fr]">
-          <div data-reveal className="bg-paper-2/60 p-7 md:p-10">
+          <div data-reveal className="bg-paper p-7 md:p-10">
             <div className="flex items-baseline justify-between gap-4">
               <h3 className="t-h3">Your college</h3>
               <span className="t-label text-mute">{responsibilities.college.length} items</span>

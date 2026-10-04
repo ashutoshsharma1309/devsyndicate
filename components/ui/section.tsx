@@ -6,19 +6,20 @@ export function Container({ className, ...props }: ComponentProps<"div">) {
 }
 
 type Tone = "light" | "dark";
+type SectionTone = Tone | "muted";
 
-/** A page section. `tone="dark"` switches to the ink surface. */
+/** A page section. `tone="muted"` is the warm alternate surface; `tone="dark"` the ink one. */
 export function Section({
   tone = "light",
   className,
   children,
   ...props
-}: ComponentProps<"section"> & { tone?: Tone }) {
+}: ComponentProps<"section"> & { tone?: SectionTone }) {
   return (
     <section
       className={cn(
         "section-y relative",
-        tone === "dark" ? "on-dark bg-ink text-white" : "bg-paper text-ink",
+        tone === "dark" ? "on-dark bg-ink text-white" : tone === "muted" ? "bg-paper-2/60 text-ink" : "bg-paper text-ink",
         className,
       )}
       {...props}

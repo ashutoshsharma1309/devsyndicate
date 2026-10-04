@@ -43,7 +43,7 @@ export function HomeHero() {
             className="fade-in flex flex-col gap-3 sm:flex-row sm:items-center lg:col-span-6 lg:justify-end"
             style={{ ["--delay" as string]: "480ms" }}
           >
-            <Magnetic>
+            <Magnetic className="max-sm:w-full">
               <ButtonLink href="/contact" size="lg" arrow className="w-full sm:w-auto">
                 Conduct a Hackathon
               </ButtonLink>
@@ -60,7 +60,7 @@ export function HomeHero() {
         >
           <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3 md:px-6">
             <figcaption className="t-label text-mute-dark">Fig. 01 — The hackathon network</figcaption>
-            <span className="t-label flex items-center gap-2 text-mute-dark">
+            <span className="t-label hidden items-center gap-2 text-mute-dark sm:flex">
               <span aria-hidden="true" className="node-blink inline-block size-1.5 rounded-full bg-signal-soft" />
               One partner, every connection
             </span>

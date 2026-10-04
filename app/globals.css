@@ -264,6 +264,150 @@ html.js [data-reveal].is-in {
   }
 }
 
+/* Ecosystem signal path (components/sections/ecosystem.tsx) */
+.eco {
+  --eco-dur: 6s;
+}
+.eco-track {
+  position: absolute;
+  left: 7px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: rgb(255 255 255 / 0.12);
+  overflow: hidden;
+}
+.eco-track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent, var(--color-signal-soft), transparent) no-repeat;
+  background-size: 100% 22%;
+  animation: eco-flow-y var(--eco-dur) linear infinite;
+}
+.eco-dot {
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  border: 1px solid rgb(140 151 255 / 0.5);
+  background: var(--color-ink);
+}
+.eco-dot::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 999px;
+  background: rgb(140 151 255 / 0.45);
+  animation: eco-light var(--eco-dur) linear infinite;
+  animation-delay: calc(var(--i, 0) * 0.8s + 0.35s);
+}
+.eco-index {
+  animation: eco-text var(--eco-dur) linear infinite;
+  animation-delay: calc(var(--i, 0) * 0.8s + 0.35s);
+}
+@media (width >= 64rem) {
+  .eco-track {
+    left: 0;
+    right: 0;
+    top: 7px;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+  }
+  .eco-track::after {
+    background: linear-gradient(to right, transparent, var(--color-signal-soft), transparent) no-repeat;
+    background-size: 25% 100%;
+    animation-name: eco-flow-x;
+  }
+  .eco-dot {
+    top: 0;
+  }
+}
+@keyframes eco-flow-x {
+  from {
+    background-position: -33.3% 0;
+  }
+  to {
+    background-position: 133.3% 0;
+  }
+}
+@keyframes eco-flow-y {
+  from {
+    background-position: 0 -28%;
+  }
+  to {
+    background-position: 0 128%;
+  }
+}
+@keyframes eco-light {
+  0%,
+  100% {
+    background: rgb(140 151 255 / 0.45);
+    box-shadow: none;
+  }
+  4% {
+    background: #fff;
+    box-shadow: 0 0 0 4px rgb(140 151 255 / 0.25);
+  }
+  16% {
+    background: rgb(140 151 255 / 0.45);
+    box-shadow: none;
+  }
+}
+@keyframes eco-text {
+  0%,
+  16%,
+  100% {
+    color: var(--color-mute-dark);
+  }
+  4% {
+    color: var(--color-signal-soft);
+  }
+}
+
+/* Accordion (FAQ) — animates open where ::details-content is supported */
+.faq-item::details-content {
+  block-size: 0;
+  overflow: clip;
+  transition:
+    block-size 0.45s var(--ease-out-expo),
+    content-visibility 0.45s allow-discrete;
+}
+.faq-item[open]::details-content {
+  block-size: auto;
+}
+@supports (interpolate-size: allow-keywords) {
+  :root {
+    interpolate-size: allow-keywords;
+  }
+}
+
+/* Auto-advance progress on the active experience tab */
+.xp-progress {
+  animation: xp-progress linear both;
+}
+@keyframes xp-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Spinner for loading buttons */
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -276,7 +420,12 @@ html.js [data-reveal].is-in {
   html.js [data-reveal]:not(.is-in) {
     opacity: 1;
   }
-  .trace-pulse {
+  .trace-pulse,
+  .eco-track::after {
     display: none;
+  }
+  .spin {
+    animation-duration: 0.8s !important;
+    animation-iteration-count: infinite !important;
   }
 }

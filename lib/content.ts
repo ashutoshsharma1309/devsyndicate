@@ -205,6 +205,72 @@ export const process = [
   },
 ] as const;
 
+/** /services — stage detail grouped by phase. Uses `lifecycle` above for the stages themselves. */
+export const phaseIntros: Record<Phase, string> = {
+  Plan: "Shape the event and make it worth showing up for.",
+  "Build-up": "Fill it with the right participants, mentors and judges.",
+  Live: "Run it smoothly, on the ground or online.",
+  After: "Turn the event into something your institution can use.",
+};
+
+/** /services — what partner companies can contribute. No named partners until they are real. */
+export const partnerOptions = [
+  {
+    title: "Bring a problem statement",
+    body: "Set a real challenge from your product or industry and see how students approach it.",
+  },
+  {
+    title: "Mentor or judge",
+    body: "Engineers and leaders from your team guide builders and evaluate the work.",
+  },
+  {
+    title: "Sponsor the event",
+    body: "Support prizes, tools, credits or the event itself, with visibility agreed up front.",
+  },
+  {
+    title: "Meet builders",
+    body: "Interact with motivated students who have just shipped something under pressure.",
+  },
+] as const;
+
+/** /about */
+export const principles = [
+  {
+    title: "Credibility over hype",
+    body: "We don't inflate numbers, invent partners or promise what we can't deliver. Your institution's name is on the event; we treat it that way.",
+  },
+  {
+    title: "Builders first",
+    body: "Every decision — format, outreach, mentoring, judging — is judged by whether it helps students build something real.",
+  },
+  {
+    title: "Responsibilities in writing",
+    body: "What your college handles and what we handle is agreed before any work starts. No surprises on either side.",
+  },
+  {
+    title: "Industry in the room",
+    body: "A hackathon matters more when the people evaluating the work are the people building technology for a living.",
+  },
+] as const;
+
+export const audiences = [
+  {
+    label: "Primary",
+    title: "Colleges & institutions",
+    body: "Management, deans, placement and training cells, innovation and incubation cells, department heads and student affairs teams.",
+  },
+  {
+    label: "Partners",
+    title: "Companies & professionals",
+    body: "Technology companies, startups, engineers and founders who want to mentor, judge, sponsor or set a challenge.",
+  },
+  {
+    label: "Participants",
+    title: "Students & communities",
+    body: "Student developers, designers and builders — and the campus communities they belong to.",
+  },
+] as const;
+
 export const responsibilities = {
   college: [
     "Venue",
@@ -239,15 +305,20 @@ export const journey = [
   { key: "win", label: "Win" },
 ] as const;
 
-export const outcomeMetrics = [
-  "Participants",
-  "Colleges reached",
-  "Projects submitted",
-  "Industry mentors",
-  "Judges",
-  "Sponsors",
-  "Hours of engagement",
-] as const;
+/**
+ * Metrics every post-event report covers. `value` stays null until there is a
+ * verified, cumulative number to publish — never fill these with estimates.
+ * When a value is set, the homepage animates it in automatically.
+ */
+export const outcomeMetrics: { label: string; detail: string; value: number | null; suffix?: string }[] = [
+  { label: "Participants", detail: "Registered, shortlisted and active on the day.", value: null },
+  { label: "Colleges reached", detail: "Campuses represented among participants.", value: null },
+  { label: "Projects submitted", detail: "Complete submissions that reached judging.", value: null },
+  { label: "Industry mentors", detail: "Professionals who mentored teams.", value: null },
+  { label: "Judges", detail: "Evaluators across judging rounds.", value: null },
+  { label: "Sponsors", detail: "Companies supporting the event.", value: null },
+  { label: "Hours of engagement", detail: "Build, mentoring and presentation time.", value: null },
+];
 
 export const expectations = [
   {
