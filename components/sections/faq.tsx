@@ -18,7 +18,7 @@ export function faqJsonLd() {
 
 export function FaqSection() {
   return (
-    <Section aria-labelledby="faq-title">
+    <Section id="faq" aria-labelledby="faq-title">
       <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(faqJsonLd())} />
       <Container>
         <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">

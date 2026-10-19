@@ -36,3 +36,21 @@ export async function verifySessionToken(token: string | undefined) {
     return false;
   }
 }
+
+/**
+ * Where to send someone after signing in: `next` if it's an internal admin
+ * path (so an emailed "Open in admin" link lands on the lead), else null.
+ * Rejects other origins, protocol-relative "//", and the login page itself.
+ */
+export function safeAdminPath(next: unknown): string | null {
+  if (typeof next !== "string" || next.length > 512 || !next.startsWith("/admin") || next.startsWith("//")) return null;
+  try {
+    const base = "http://admin.invalid";
+    const url = new URL(next, base);
+    if (url.origin !== base) return null;
+    if (!/^\/admin(\/|$)/.test(url.pathname) || url.pathname.replace(/\/+$/, "") === "/admin/login") return null;
+    return url.pathname + url.search;
+  } catch {
+    return null;
+  }
+}

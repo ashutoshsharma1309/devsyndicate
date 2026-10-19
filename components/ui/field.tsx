@@ -1,8 +1,13 @@
 import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * - 16px text below `sm`: iOS Safari zooms the page when a smaller control is focused.
+ * - Border ink/47 is the lightest that keeps 3:1 against both the white fill (3.4:1) and
+ *   the paper background (3.0:1); placeholder mute/85 is the lightest at 4.5:1 on white.
+ */
 const control =
-  "block w-full rounded-sm border border-line bg-white px-3.5 text-[0.9375rem] text-ink shadow-[0_1px_0_rgb(10_11_13/0.03)] transition-[border-color,box-shadow] duration-200 placeholder:text-mute/60 hover:border-ink/30 focus:border-signal focus:outline-none focus:ring-4 focus:ring-signal/12 aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/12 disabled:opacity-60";
+  "block w-full rounded-sm border border-ink/47 bg-white px-3.5 text-base text-ink shadow-[0_1px_0_rgb(10_11_13/0.03)] transition-[border-color,box-shadow] duration-200 placeholder:text-mute/85 hover:border-ink/70 focus:border-signal focus:outline-none focus:ring-4 focus:ring-signal/12 aria-[invalid=true]:border-danger aria-[invalid=true]:focus:ring-danger/12 disabled:opacity-60 sm:text-[0.9375rem]";
 
 type FieldProps = {
   id: string;
@@ -27,7 +32,7 @@ export function Field({ id, label, required, hint, error, className, children }:
             </span>
           ) : null}
         </span>
-        {!required && <span className="t-label text-mute">Optional</span>}
+        {!required && <span className="t-label font-normal text-mute">Optional</span>}
       </label>
       {children}
       <FieldMessage id={id} hint={hint} error={error} />
@@ -71,7 +76,8 @@ export function Select({ className, children, ...props }: ComponentProps<"select
   return (
     <div className="relative">
       <select
-        className={cn(control, "h-12 appearance-none pr-10 invalid:text-mute/70 [&>option]:text-ink", className)}
+        data-empty={props.value === "" ? true : undefined}
+        className={cn(control, "h-12 appearance-none pr-10 data-empty:text-mute [&>option]:text-ink", className)}
         {...props}
       >
         {children}
@@ -99,8 +105,9 @@ export function ChoiceGroup({
   onChange,
   error,
   hint,
-  columns = "sm:grid-cols-3",
+  columns = "grid-cols-2 sm:grid-cols-3",
   required,
+  optional,
 }: {
   name: string;
   legend: string;
@@ -111,27 +118,34 @@ export function ChoiceGroup({
   hint?: string;
   columns?: string;
   required?: boolean;
+  /** Shows the same "Optional" tag as Field. */
+  optional?: boolean;
 }) {
   const id = `f-${name}`;
   return (
     <fieldset aria-describedby={describedBy(id, error, hint)}>
-      <legend className="mb-2 text-sm font-medium">
-        {legend}
-        {required && (
-          <span aria-hidden="true" className="ml-0.5 text-signal">
-            *
-          </span>
-        )}
+      <legend className="mb-2 flex w-full items-baseline justify-between gap-3 text-sm font-medium">
+        <span>
+          {legend}
+          {required && (
+            <span aria-hidden="true" className="ml-0.5 text-signal">
+              *
+            </span>
+          )}
+        </span>
+        {optional && <span className="t-label font-normal text-mute">Optional</span>}
       </legend>
-      <div id={id} tabIndex={-1} className={cn("grid grid-cols-2 gap-2 outline-none", columns)}>
+      {/* Not focusable: after a failed submit the form focuses the first radio inside. */}
+      <div id={id} className={cn("grid gap-2", columns)}>
         {options.map((o) => {
           const checked = value === o.value;
           return (
             <label
               key={o.value}
               className={cn(
-                "relative flex cursor-pointer items-center gap-3 rounded-sm border bg-white px-3.5 py-3 text-[0.9375rem] transition-[border-color,background-color,box-shadow] duration-200 has-focus-visible:ring-4 has-focus-visible:ring-signal/15",
-                checked ? "border-signal bg-signal/4" : error ? "border-danger/60 hover:border-danger" : "border-line hover:border-ink/30",
+                // Solid ring with an offset: the radio itself is visually hidden, so this is the only focus indicator.
+                "relative flex cursor-pointer items-center gap-3 rounded-sm border bg-white px-3.5 py-3 text-[0.9375rem] transition-[border-color,background-color,box-shadow] duration-200 has-focus-visible:ring-2 has-focus-visible:ring-signal has-focus-visible:ring-offset-2 has-focus-visible:ring-offset-paper",
+                checked ? "border-signal bg-signal/4" : error ? "border-danger" : "border-ink/47 hover:border-ink/70",
               )}
             >
               <input
@@ -139,6 +153,7 @@ export function ChoiceGroup({
                 name={name}
                 value={o.value}
                 checked={checked}
+                required={required}
                 onChange={() => onChange(o.value)}
                 className="peer sr-only"
               />
@@ -146,7 +161,7 @@ export function ChoiceGroup({
                 aria-hidden="true"
                 className={cn(
                   "grid size-4 shrink-0 place-items-center rounded-full border transition-colors",
-                  checked ? "border-signal" : "border-ink/25",
+                  checked ? "border-signal" : "border-ink/47",
                 )}
               >
                 <span className={cn("size-2 rounded-full bg-signal transition-transform", checked ? "scale-100" : "scale-0")} />

@@ -8,6 +8,7 @@ export function PageHero({
   lead,
   children,
   aside,
+  below,
   className,
 }: {
   eyebrow: string;
@@ -15,6 +16,8 @@ export function PageHero({
   lead?: ReactNode;
   children?: ReactNode;
   aside?: ReactNode;
+  /** Full-width content under the title block, e.g. contact options. */
+  below?: ReactNode;
   className?: string;
 }) {
   return (
@@ -54,6 +57,11 @@ export function PageHero({
             </div>
           )}
         </div>
+        {below && (
+          <div className="fade-in mt-12 md:mt-16" style={{ ["--delay" as string]: "360ms" }}>
+            {below}
+          </div>
+        )}
       </div>
     </section>
   );

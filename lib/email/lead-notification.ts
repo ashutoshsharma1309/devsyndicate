@@ -1,8 +1,9 @@
 import "server-only";
 import { site } from "@/lib/site";
+import { formatLocation } from "@/lib/utils";
 import {
   eventFormats,
-  eventTypes,
+  allEventTypes,
   labelFor,
   participantRanges,
   timelines,
@@ -16,14 +17,14 @@ const esc = (s: string) =>
 // Header-safe: no line breaks in the subject.
 const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").slice(0, 120);
 
-export function leadNotification(lead: LeadData, opts: { to: string; id?: string }): Email {
+/** `source`: the form page plus first-touch attribution (landing page, referrer) — see lib/attribution.ts. */
+export function leadNotification(lead: LeadData, opts: { to: string; id?: string; source?: string | null }): Email {
   const groups: [string, [string, string][]][] = [
     [
       "Institution",
       [
         ["Institution", lead.institution],
-        ["City", lead.city],
-        ["State", lead.state],
+        ["Location", formatLocation(lead)],
         ["Website", lead.website || "—"],
       ],
     ],
@@ -31,7 +32,7 @@ export function leadNotification(lead: LeadData, opts: { to: string; id?: string
       "Contact",
       [
         ["Name", lead.name],
-        ["Designation", lead.designation],
+        ["Designation", lead.designation || "—"],
         ["Email", lead.email],
         ["Phone", lead.phone],
       ],
@@ -39,11 +40,12 @@ export function leadNotification(lead: LeadData, opts: { to: string; id?: string
     [
       "Event",
       [
-        ["Event type", labelFor(eventTypes, lead.eventType)],
+        ["Enquiry type", labelFor(allEventTypes, lead.eventType)],
         ["Expected participants", labelFor(participantRanges, lead.participants)],
         ["Format", labelFor(eventFormats, lead.format)],
         ["Timeline", labelFor(timelines, lead.timeline)],
         ["Theme / technology", lead.theme || "—"],
+        ["Source", opts.source || "—"],
       ],
     ],
   ];
@@ -51,7 +53,7 @@ export function leadNotification(lead: LeadData, opts: { to: string; id?: string
   const adminUrl = opts.id ? `${site.url}/admin/leads/${opts.id}` : null;
 
   const text = [
-    `New hackathon request from ${lead.institution}`,
+    `New website enquiry from ${lead.institution}`,
     "",
     ...groups.flatMap(([title, rows]) => [`— ${title} —`, ...rows.map(([k, v]) => `${k}: ${v}`), ""]),
     "— Additional requirements —",
@@ -65,9 +67,9 @@ export function leadNotification(lead: LeadData, opts: { to: string; id?: string
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
 <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border:1px solid #d9d9d1;border-radius:8px">
 <tr><td style="padding:28px 32px;border-bottom:1px solid #eaeae4">
-<p style="margin:0;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#3a4cff;font-family:ui-monospace,Menlo,monospace">New hackathon request</p>
+<p style="margin:0;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#3a4cff;font-family:ui-monospace,Menlo,monospace">New website enquiry</p>
 <h1 style="margin:10px 0 0;font-size:22px;line-height:1.25;letter-spacing:-.02em">${esc(lead.institution)}</h1>
-<p style="margin:6px 0 0;color:#5b5e66;font-size:14px">${esc(lead.name)}, ${esc(lead.designation)} · ${esc(lead.city)}, ${esc(lead.state)}</p>
+<p style="margin:6px 0 0;color:#5b5e66;font-size:14px">${esc([lead.name, lead.designation].filter(Boolean).join(", "))} · ${esc(formatLocation(lead))}</p>
 </td></tr>
 ${groups
   .map(
@@ -97,7 +99,7 @@ ${
   return {
     to: opts.to,
     replyTo: lead.email,
-    subject: oneLine(`Hackathon request — ${lead.institution} (${labelFor(eventTypes, lead.eventType)})`),
+    subject: oneLine(`Website enquiry — ${lead.institution} (${labelFor(allEventTypes, lead.eventType)})`),
     text,
     html,
   };

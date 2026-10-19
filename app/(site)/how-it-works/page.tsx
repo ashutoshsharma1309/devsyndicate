@@ -1,17 +1,21 @@
+import { PageJsonLd } from "@/components/layout/json-ld";
 import { PageHero } from "@/components/layout/page-hero";
 import { ProcessSteps } from "@/components/process/process-steps";
 import { FinalCta } from "@/components/sections/final-cta";
 import { ResponsibilitySplit } from "@/components/sections/responsibility-split";
 import { ButtonLink } from "@/components/ui/button";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
-import { pageMetadata } from "@/lib/seo";
+import { pageMetadata, type PageSeo } from "@/lib/seo";
 
-export const metadata = pageMetadata({
-  title: "How It Works",
+const page: PageSeo = {
+  title: "How Hackathon Planning Works",
+  breadcrumb: "How It Works",
   description:
     "How a hackathon partnership with Dev Syndicate works — from the first conversation to the post-event report, and exactly what your college and our team each handle.",
   path: "/how-it-works",
-});
+};
+
+export const metadata = pageMetadata(page);
 
 const afterContact = [
   { title: "You send a request", body: "A short form about your institution, objectives and the event you have in mind." },
@@ -36,6 +40,7 @@ const windows = [
 export default function HowItWorksPage() {
   return (
     <>
+      <PageJsonLd page={page} />
       <PageHero
         eyebrow="How it works"
         title="From conversation to hackathon."

@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode, type Ref } from "react";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { ChoiceGroup, describedBy, Field, Input, Select, Textarea } from "@/components/ui/field";
+import { track } from "@/lib/analytics";
+import { describeAttribution, safePath } from "@/lib/attribution";
+import { CONTACT_ENDPOINT, submitContactForm } from "@/lib/contact/submit";
 import { site } from "@/lib/site";
 import {
   eventFormats,
   eventTypes,
   fieldErrors,
-  indianStates,
   labelFor,
   leadSchema,
   participantRanges,
@@ -22,31 +24,43 @@ import {
 type Values = Record<LeadField, string>;
 type Errors = Partial<Record<LeadField, string>>;
 type Status = "idle" | "submitting" | "success" | "error";
+/** Outcome of a plain form post (no JavaScript yet), shown on /contact/invalid and /contact/error. */
+type Notice = "invalid" | "error";
 
 const empty: Values = {
-  institution: "",
-  city: "",
-  state: "",
-  website: "",
   name: "",
   designation: "",
+  institution: "",
+  city: "",
   email: "",
   phone: "",
   eventType: "",
   participants: "",
-  format: "",
   timeline: "",
-  theme: "",
+  format: "",
   message: "",
+  // Not on the form any more; still accepted by the API (see lib/validation/lead.ts).
+  state: "",
+  website: "",
+  theme: "",
 };
 
 /** Order used to move focus to the first problem after a failed submit. */
 const order = Object.keys(empty) as LeadField[];
 const fieldId = (f: LeadField) => `f-${f}`;
 
+const noSubscribe = () => () => {};
+
+/** Focuses a field; for a radio group, its selected (or first) radio rather than the wrapper. */
+function focusField(f: LeadField) {
+  const el = document.getElementById(fieldId(f));
+  if (!el || el.matches("input, select, textarea")) return el?.focus();
+  (el.querySelector<HTMLInputElement>("input:checked") ?? el.querySelector<HTMLInputElement>("input"))?.focus();
+}
+
 const hints = {
-  email: "Your institutional address helps us verify the request.",
-  message: "Dates you're considering, sponsors already involved, venue details — anything that helps.",
+  email: "An institutional address helps us verify the request.",
+  message: "Dates you're considering, themes, sponsors already involved, venue details — anything that helps.",
 };
 
 function validate(values: Values): Errors {
@@ -54,26 +68,39 @@ function validate(values: Values): Errors {
   return r.success ? {} : fieldErrors(r.error.issues);
 }
 
-/** Reads `?format=` (from "Discuss this format" links) to pre-select the event type. */
+/** Formats shown on the site that map to the general enquiry type, with a starter note. */
+const formatNotes: Record<string, string> = {
+  innovation: "We're interested in an Innovation Challenge.",
+  custom: "We're interested in a custom format.",
+};
+
+/** Reads `?format=` (from "Discuss this format" links) or `?type=` to pre-select the enquiry type. */
 export function LeadFormWithPreset() {
-  const format = useSearchParams().get("format");
-  return <LeadForm preset={eventTypes.some((t) => t.value === format) ? format! : undefined} />;
+  const params = useSearchParams();
+  const key = params.get("type") ?? params.get("format") ?? "";
+  if (eventTypes.some((t) => t.value === key)) return <LeadForm preset={{ eventType: key }} />;
+  if (formatNotes[key]) return <LeadForm preset={{ eventType: "general", message: formatNotes[key] }} />;
+  return <LeadForm />;
 }
 
-export function LeadForm({ preset }: { preset?: string }) {
-  const [values, setValues] = useState<Values>(() => ({ ...empty, eventType: preset ?? "" }));
+export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<Values>; notice?: Notice }) {
+  const [values, setValues] = useState<Values>(() => ({ ...empty, ...preset }));
   const [errors, setErrors] = useState<Errors>({});
   const [touched, setTouched] = useState<Partial<Record<LeadField, boolean>>>({});
   const [status, setStatus] = useState<Status>("idle");
   const [serverError, setServerError] = useState("");
   const [summary, setSummary] = useState("");
-  const startedAt = useRef(0);
+  const [notice, setNotice] = useState(initialNotice);
+  // Until hydration the browser's own validation applies (a plain post); after it, ours does.
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
+  const mountedAt = useRef(0);
+  const started = useRef(false);
   const honeypot = useRef<HTMLInputElement>(null);
   const resultRef = useRef<HTMLDivElement>(null);
-  const summaryRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    startedAt.current = Date.now();
+    // Monotonic clock: unaffected by a wrong system time (the server only sees the elapsed ms).
+    mountedAt.current = performance.now();
   }, []);
 
   useEffect(() => {
@@ -95,113 +122,117 @@ export function LeadForm({ preset }: { preset?: string }) {
     if (values[field] !== "") setErrors((e) => ({ ...e, [field]: validate(values)[field] }));
   };
 
-  const text = (field: LeadField) => ({
+  const control = (field: LeadField, hint?: string) => ({
     id: fieldId(field),
     name: field,
     value: values[field],
     onChange: (e: { target: { value: string } }) => set(field, e.target.value),
     onBlur: () => blur(field),
     "aria-invalid": errors[field] ? true : undefined,
+    "aria-describedby": describedBy(fieldId(field), errors[field], hint),
   });
+
+  const onFirstInteraction = () => {
+    if (started.current) return;
+    started.current = true;
+    track("contact_form_start");
+  };
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (status === "submitting") return;
 
+    setNotice(undefined);
     const errs = validate(values);
     setErrors(errs);
     const first = order.find((f) => errs[f]);
     if (first) {
       const count = Object.keys(errs).length;
       setSummary(`${count} ${count === 1 ? "field needs" : "fields need"} attention before we can send this.`);
-      document.getElementById(fieldId(first))?.focus();
+      focusField(first);
       return;
     }
     setSummary("");
     setStatus("submitting");
     setServerError("");
 
-    try {
-      const res = await fetch("/api/leads", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...values,
-          [spamFields.honeypot]: honeypot.current?.value ?? "",
-          [spamFields.startedAt]: startedAt.current,
-          source: window.location.pathname + window.location.search,
-        }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string; fields?: Errors };
-      if (res.ok && data.ok) {
-        setStatus("success");
-        return;
-      }
-      if (res.status === 422 && data.fields) {
-        setErrors(data.fields);
-        setStatus("idle");
-        const f = order.find((k) => data.fields?.[k]);
-        setSummary(data.error ?? "Some details need another look.");
-        if (f) document.getElementById(fieldId(f))?.focus();
-        return;
-      }
-      setServerError(data.error ?? "Something went wrong on our side.");
-      setStatus("error");
-    } catch {
-      setServerError("We couldn't reach our server. Check your connection and try again.");
-      setStatus("error");
+    const attribution = describeAttribution();
+    const result = await submitContactForm(values, {
+      fillMs: performance.now() - mountedAt.current,
+      honeypot: honeypot.current?.value ?? "",
+      source: [safePath(window.location), attribution].filter(Boolean).join(" | ").slice(0, 300),
+    });
+
+    if (result.ok) {
+      // Only counted once the server has confirmed the request was stored or emailed.
+      track("contact_form_submit_success", { enquiry_type: values.eventType });
+      setStatus("success");
+      return;
     }
+    track("contact_form_submit_error", { reason: result.reason });
+    if (result.reason === "invalid") {
+      setErrors(result.fields);
+      setStatus("idle");
+      setSummary(result.message);
+      const f = order.find((k) => result.fields[k]);
+      if (f) focusField(f);
+      return;
+    }
+    setServerError(result.message);
+    setStatus("error");
   }
+
+  const contact = site.primaryContact;
 
   if (status === "success") {
     return (
-      <div
+      <Received
         ref={resultRef}
-        tabIndex={-1}
-        role="status"
-        className="rounded-md border border-line bg-white p-8 outline-none md:p-12"
-      >
-        <span className="grid size-12 place-items-center rounded-full bg-signal text-white">
-          <svg aria-hidden="true" viewBox="0 0 16 16" className="size-5" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3.5 8.5l3 3 6-7" strokeLinecap="square" />
-          </svg>
-        </span>
-        <h2 className="t-h3 mt-8 text-[clamp(1.75rem,1.4rem+1.2vw,2.5rem)] tracking-[-0.035em]">Request received.</h2>
-        <p className="t-lead mt-4 max-w-xl text-mute">
-          Thanks for reaching out. Your request has been received. The Dev Syndicate team will review the details and
-          get in touch.
-        </p>
-        <dl className="mt-8 grid gap-px overflow-hidden rounded-sm border border-line bg-line text-sm sm:grid-cols-3">
-          {[
-            ["Institution", values.institution],
-            ["Event", labelFor(eventTypes, values.eventType)],
-            ["We'll reply to", values.email],
-          ].map(([k, v]) => (
-            <div key={k} className="bg-paper p-4">
-              <dt className="t-label text-mute">{k}</dt>
-              <dd className="mt-1.5 break-words">{v}</dd>
-            </div>
-          ))}
-        </dl>
-        <div className="mt-10 flex flex-col gap-3 sm:flex-row">
-          <ButtonLink href="/how-it-works" variant="secondary" arrow>
-            See what happens next
-          </ButtonLink>
-          <ButtonLink href="/" variant="ghost" className="sm:ml-4">
-            Back to home
-          </ButtonLink>
-        </div>
-      </div>
+        details={[
+          ["Institution", values.institution],
+          ["Enquiry", labelFor(eventTypes, values.eventType)],
+          ["We'll reply to", values.email],
+        ]}
+      />
     );
   }
 
   const submitting = status === "submitting";
 
   return (
-    <form noValidate onSubmit={onSubmit} aria-describedby="form-note" className="space-y-14">
+    // method/action: if Send is pressed before hydration, the browser posts to the API (which
+    // redirects to /contact/sent|invalid|error) instead of GETting /contact with the details in the URL.
+    <form
+      method="post"
+      action={CONTACT_ENDPOINT}
+      noValidate={hydrated}
+      onSubmit={onSubmit}
+      onFocus={onFirstInteraction}
+      aria-describedby="form-note"
+      aria-busy={submitting}
+      className="space-y-12"
+    >
+      {notice && (
+        <div role="alert" className="rounded-sm border border-danger/30 bg-danger/[0.05] p-5 text-sm">
+          <p className="font-medium text-danger">
+            {notice === "invalid" ? "Some details in your enquiry need another look." : "Your enquiry wasn't sent."}
+          </p>
+          <p className="mt-1.5 leading-relaxed text-ink/80">
+            Please fill in the form again, or reach us directly: call {contact.name} on{" "}
+            <a className="underline underline-offset-4" href={contact.phone.href}>
+              {contact.phone.display}
+            </a>{" "}
+            or email{" "}
+            <a className="underline underline-offset-4" href={`mailto:${site.email}`}>
+              {site.email}
+            </a>
+            .
+          </p>
+        </div>
+      )}
+
       {summary && (
         <div
-          ref={summaryRef}
           role="alert"
           className="flex items-start gap-3 rounded-sm border border-danger/30 bg-danger/[0.05] px-4 py-3.5 text-sm text-danger"
         >
@@ -210,124 +241,84 @@ export function LeadForm({ preset }: { preset?: string }) {
         </div>
       )}
 
-      {/* Honeypot — invisible to people and assistive tech. */}
+      {/* Honeypot — invisible to people and assistive tech. A meaningless name so autofill never fills it. */}
       <div aria-hidden="true" className="absolute -left-[9999px] h-px w-px overflow-hidden">
-        <label htmlFor="company_url">Leave this field empty</label>
-        <input ref={honeypot} id="company_url" name="company_url" type="text" tabIndex={-1} autoComplete="off" />
+        <label htmlFor={spamFields.honeypot}>Do not fill this in</label>
+        <input
+          ref={honeypot}
+          id={spamFields.honeypot}
+          name={spamFields.honeypot}
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+        />
       </div>
 
-      <Group n="01" title="Your institution">
-        <Field id={fieldId("institution")} label="College / Institution name" required error={errors.institution} className="sm:col-span-2">
-          <Input
-            {...text("institution")}
-            autoComplete="organization"
-            placeholder="e.g. National Institute of Technology"
-            aria-describedby={describedBy(fieldId("institution"), errors.institution)}
-            maxLength={160}
-          />
-        </Field>
-        <Field id={fieldId("city")} label="City" required error={errors.city}>
-          <Input
-            {...text("city")}
-            autoComplete="address-level2"
-            aria-describedby={describedBy(fieldId("city"), errors.city)}
-            maxLength={80}
-          />
-        </Field>
-        <Field id={fieldId("state")} label="State" required error={errors.state}>
-          <Select
-            {...text("state")}
-            required
-            autoComplete="address-level1"
-            aria-describedby={describedBy(fieldId("state"), errors.state)}
-          >
-            <option value="" disabled>
-              Select state
-            </option>
-            {indianStates.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field id={fieldId("website")} label="Website" error={errors.website} className="sm:col-span-2">
-          <Input
-            {...text("website")}
-            type="url"
-            inputMode="url"
-            autoComplete="url"
-            placeholder="www.yourcollege.edu.in"
-            aria-describedby={describedBy(fieldId("website"), errors.website)}
-            maxLength={200}
-          />
-        </Field>
-      </Group>
-
-      <Group n="02" title="Your details">
+      <Group n="01" title="About you">
         <Field id={fieldId("name")} label="Full name" required error={errors.name}>
-          <Input {...text("name")} autoComplete="name" aria-describedby={describedBy(fieldId("name"), errors.name)} maxLength={120} />
+          <Input {...control("name")} required autoComplete="name" maxLength={120} />
         </Field>
-        <Field id={fieldId("designation")} label="Designation" required error={errors.designation}>
+        <Field id={fieldId("designation")} label="Designation" error={errors.designation}>
           <Input
-            {...text("designation")}
+            {...control("designation")}
             autoComplete="organization-title"
             placeholder="e.g. Training & Placement Officer"
-            aria-describedby={describedBy(fieldId("designation"), errors.designation)}
             maxLength={120}
           />
         </Field>
-        <Field
-          id={fieldId("email")}
-          label="Official email"
-          required
-          error={errors.email}
-          hint={hints.email}
-        >
+        <Field id={fieldId("institution")} label="College or institution" required error={errors.institution}>
           <Input
-            {...text("email")}
+            {...control("institution")}
+            required
+            autoComplete="organization"
+            placeholder="e.g. National Institute of Technology"
+            maxLength={160}
+          />
+        </Field>
+        <Field id={fieldId("city")} label="City" error={errors.city}>
+          <Input {...control("city")} autoComplete="address-level2" maxLength={80} />
+        </Field>
+        <Field id={fieldId("email")} label="Work or institutional email" required error={errors.email} hint={hints.email}>
+          <Input
+            {...control("email", hints.email)}
+            required
             type="email"
             inputMode="email"
             autoComplete="email"
             spellCheck={false}
-            aria-describedby={describedBy(fieldId("email"), errors.email, hints.email)}
+            placeholder="name@college.edu.in"
             maxLength={200}
           />
         </Field>
         <Field id={fieldId("phone")} label="Phone number" required error={errors.phone}>
           <Input
-            {...text("phone")}
+            {...control("phone")}
+            required
             type="tel"
             inputMode="tel"
             autoComplete="tel"
             placeholder="+91"
-            aria-describedby={describedBy(fieldId("phone"), errors.phone)}
             maxLength={24}
           />
         </Field>
       </Group>
 
-      <Group n="03" title="The event you have in mind">
+      <Group n="02" title="Your enquiry">
         <div className="sm:col-span-2">
           <ChoiceGroup
             name="eventType"
-            legend="Interested event type"
+            legend="What is your enquiry about?"
             required
             options={eventTypes}
             value={values.eventType}
             onChange={(v) => set("eventType", v)}
             error={errors.eventType}
+            columns="grid-cols-2 lg:grid-cols-3"
           />
         </div>
-        <Field id={fieldId("participants")} label="Expected participants" required error={errors.participants}>
-          <Select
-            {...text("participants")}
-            required
-            aria-describedby={describedBy(fieldId("participants"), errors.participants)}
-          >
-            <option value="" disabled>
-              Select a range
-            </option>
+        <Field id={fieldId("participants")} label="Expected participants" error={errors.participants}>
+          <Select {...control("participants")}>
+            <option value="">Select a range</option>
             {participantRanges.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -335,11 +326,9 @@ export function LeadForm({ preset }: { preset?: string }) {
             ))}
           </Select>
         </Field>
-        <Field id={fieldId("timeline")} label="Preferred timeline" required error={errors.timeline}>
-          <Select {...text("timeline")} required aria-describedby={describedBy(fieldId("timeline"), errors.timeline)}>
-            <option value="" disabled>
-              When would you like to hold it?
-            </option>
+        <Field id={fieldId("timeline")} label="Approximate timeline" error={errors.timeline}>
+          <Select {...control("timeline")}>
+            <option value="">When would you like to hold it?</option>
             {timelines.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
@@ -350,23 +339,15 @@ export function LeadForm({ preset }: { preset?: string }) {
         <div className="sm:col-span-2">
           <ChoiceGroup
             name="format"
-            legend="Preferred event format"
-            required
+            legend="Preferred format"
+            optional
             options={eventFormats}
             value={values.format}
             onChange={(v) => set("format", v)}
             error={errors.format}
-            columns="grid-cols-1 min-[420px]:grid-cols-3"
+            columns="grid-cols-3"
           />
         </div>
-        <Field id={fieldId("theme")} label="Theme / technology area" error={errors.theme} className="sm:col-span-2">
-          <Input
-            {...text("theme")}
-            placeholder="e.g. AI for agriculture, open innovation, fintech"
-            aria-describedby={describedBy(fieldId("theme"), errors.theme)}
-            maxLength={200}
-          />
-        </Field>
         <Field
           id={fieldId("message")}
           label="Additional requirements"
@@ -374,12 +355,7 @@ export function LeadForm({ preset }: { preset?: string }) {
           hint={hints.message}
           className="sm:col-span-2"
         >
-          <Textarea
-            {...text("message")}
-            rows={5}
-            aria-describedby={describedBy(fieldId("message"), errors.message, hints.message)}
-            maxLength={3000}
-          />
+          <Textarea {...control("message", hints.message)} rows={5} maxLength={3000} />
         </Field>
       </Group>
 
@@ -390,15 +366,16 @@ export function LeadForm({ preset }: { preset?: string }) {
           role="alert"
           className="rounded-sm border border-danger/30 bg-danger/[0.05] p-5 text-sm outline-none"
         >
-          <p className="font-medium text-danger">Your request wasn&apos;t sent.</p>
-          <p className="mt-1.5 text-ink/80">
-            {serverError} Your details are still here — try again, or reach us directly at{" "}
+          <p className="font-medium text-danger">Your enquiry wasn&apos;t sent.</p>
+          <p className="mt-1.5 leading-relaxed text-ink/80">
+            {serverError} Your details are still here, so you can try again. Or reach us directly: call {contact.name}{" "}
+            on{" "}
+            <a className="underline underline-offset-4" href={contact.phone.href}>
+              {contact.phone.display}
+            </a>{" "}
+            or email{" "}
             <a className="underline underline-offset-4" href={`mailto:${site.email}`}>
               {site.email}
-            </a>{" "}
-            or{" "}
-            <a className="underline underline-offset-4" href={site.phone.href}>
-              {site.phone.display}
             </a>
             .
           </p>
@@ -408,23 +385,23 @@ export function LeadForm({ preset }: { preset?: string }) {
       <div className="flex flex-col gap-5 border-t border-line pt-8 sm:flex-row sm:items-center sm:justify-between">
         <p id="form-note" className="max-w-sm text-[0.8125rem] leading-relaxed text-mute">
           Fields marked <span className="text-signal">*</span> are required. We use these details only to respond to
-          your request — see our{" "}
+          your enquiry and never share them for marketing — see our{" "}
           <Link href="/privacy" className="underline underline-offset-4 hover:text-ink">
             privacy policy
           </Link>
           .
         </p>
-        <Button type="submit" size="lg" disabled={submitting} aria-disabled={submitting} className="w-full sm:w-auto">
+        <Button type="submit" size="lg" disabled={submitting} className="w-full shrink-0 sm:w-auto">
           {submitting ? (
             <>
               <svg aria-hidden="true" viewBox="0 0 16 16" className="spin size-4" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M8 1.5a6.5 6.5 0 106.5 6.5" strokeLinecap="round" />
               </svg>
-              Sending request…
+              Sending enquiry…
             </>
           ) : (
             <>
-              Request a Conversation
+              Send Enquiry
               <svg
                 aria-hidden="true"
                 viewBox="0 0 16 16"
@@ -440,7 +417,7 @@ export function LeadForm({ preset }: { preset?: string }) {
         </Button>
       </div>
       <p className="sr-only" aria-live="polite">
-        {submitting ? "Sending your request" : ""}
+        {submitting ? "Sending your enquiry" : ""}
       </p>
     </form>
   );
@@ -455,5 +432,54 @@ function Group({ n, title, children }: { n: string; title: string; children: Rea
       </legend>
       {children}
     </fieldset>
+  );
+}
+
+/**
+ * Confirmation once the server has accepted the enquiry. `details` echo what the visitor typed, so they're only
+ * shown in the same page session — never after the plain-form redirect, which carries nothing but the outcome.
+ */
+export function Received({ ref, details }: { ref?: Ref<HTMLDivElement>; details?: [string, string][] }) {
+  const contact = site.primaryContact;
+  return (
+    <div ref={ref} tabIndex={-1} role="status" className="rounded-md border border-line bg-white p-7 outline-none md:p-12">
+      <span className="grid size-12 place-items-center rounded-full bg-signal text-white">
+        <svg aria-hidden="true" viewBox="0 0 16 16" className="size-5" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M3.5 8.5l3 3 6-7" strokeLinecap="square" />
+        </svg>
+      </span>
+      <h2 className="mt-8 text-[clamp(1.75rem,1.4rem+1.2vw,2.5rem)] font-medium leading-tight tracking-[-0.035em]">
+        Enquiry received.
+      </h2>
+      <p className="t-lead mt-4 max-w-xl text-mute">
+        Thank you. Your enquiry has reached the Dev Syndicate team. We&apos;ll review the details and get in touch to
+        arrange a conversation.
+      </p>
+      {details && (
+        <dl className="mt-8 grid gap-px overflow-hidden rounded-sm border border-line bg-line text-sm sm:grid-cols-3">
+          {details.map(([k, v]) => (
+            <div key={k} className="bg-paper p-4">
+              <dt className="t-label text-mute">{k}</dt>
+              <dd className="mt-1.5 break-words">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <p className="mt-8 text-[0.9375rem] text-mute">
+        Working to a tight timeline? Call {contact.name} on{" "}
+        <a href={contact.phone.href} className="text-ink underline decoration-ink/25 underline-offset-4 hover:decoration-signal">
+          {contact.phone.display}
+        </a>
+        .
+      </p>
+      <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <ButtonLink href="/how-it-works" variant="secondary" arrow>
+          See what happens next
+        </ButtonLink>
+        <ButtonLink href="/" variant="ghost" className="sm:ml-4">
+          Back to home
+        </ButtonLink>
+      </div>
+    </div>
   );
 }

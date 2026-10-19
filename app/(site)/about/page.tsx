@@ -1,20 +1,27 @@
+import { PageJsonLd } from "@/components/layout/json-ld";
 import { PageHero } from "@/components/layout/page-hero";
 import { FinalCta } from "@/components/sections/final-cta";
+import { TeamSection } from "@/components/sections/team";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
 import { audiences, principles } from "@/lib/content";
-import { pageMetadata } from "@/lib/seo";
+import { pageMetadata, type PageSeo } from "@/lib/seo";
 import { site } from "@/lib/site";
 
-export const metadata = pageMetadata({
-  title: "About",
+const page: PageSeo = {
+  title: "About Dev Syndicate | Hackathon Partner for Colleges",
+  absoluteTitle: true,
+  breadcrumb: "About",
   description:
-    "Dev Syndicate is a Bengaluru-based hackathon partner for colleges and institutions, connecting campuses with the people building technology.",
+    "Meet Dev Syndicate, a Bengaluru-based hackathon partner for colleges led by Shiven Kumar and Ashutosh Sharma — why we exist, how we work and who we work with.",
   path: "/about",
-});
+};
+
+export const metadata = pageMetadata(page);
 
 export default function AboutPage() {
   return (
     <>
+      <PageJsonLd page={page} />
       <PageHero
         eyebrow="About Dev Syndicate"
         title="We run the hackathon. Your college gets the outcome."
@@ -92,7 +99,9 @@ export default function AboutPage() {
         </Container>
       </Section>
 
-      <Section tone="muted" aria-labelledby="details-title">
+      <TeamSection tone="muted" />
+
+      <Section aria-labelledby="details-title">
         <Container>
           <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
             <div className="lg:col-span-5">
@@ -112,6 +121,18 @@ export default function AboutPage() {
                   <a key="e" href={`mailto:${site.email}`} className="underline decoration-ink/25 underline-offset-4 hover:decoration-signal">
                     {site.email}
                   </a>,
+                ],
+                [
+                  "Primary contact",
+                  <span key="c">
+                    {site.primaryContact.name}, {site.primaryContact.role} ·{" "}
+                    <a
+                      href={site.primaryContact.phone.href}
+                      className="underline decoration-ink/25 underline-offset-4 hover:decoration-signal"
+                    >
+                      {site.primaryContact.phone.display}
+                    </a>
+                  </span>,
                 ],
                 [
                   "Phone",

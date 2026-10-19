@@ -235,21 +235,83 @@ html.js [data-reveal].is-in {
   }
 }
 
-/* Signal pulses travelling along circuit traces */
-.trace-pulse {
-  stroke-dasharray: 7 200;
-  stroke-dashoffset: 7;
-  animation: trace-pulse var(--dur, 2.8s) linear infinite;
+/* Off-screen pause: the hero and ecosystem loops run from first paint exactly
+   as before, and only pause once reveal-observer.tsx has confirmed their
+   [data-ambient] container is out of view or the tab is hidden ([data-idle]). */
+[data-ambient][data-idle] :is(.flow-pulse, .flow-node, .flow-ring, .node-blink, .eco-index),
+[data-ambient][data-idle] :is(.eco-track, .eco-dot)::after {
+  animation-play-state: paused;
+}
+
+/* Site-wide pause (components/ui/motion-toggle.tsx, WCAG 2.2.2): the
+   decorative loops settle into the same static state as under
+   prefers-reduced-motion. One-off entrances and scroll reveals still run. */
+html[data-motion="paused"] .flow-pulse,
+html[data-motion="paused"] .flow-ring,
+html[data-motion="paused"] .eco-track::after {
+  display: none;
+}
+html[data-motion="paused"] .flow-node {
+  animation: none;
+  opacity: 1;
+}
+html[data-motion="paused"] :is(.node-blink, .eco-index),
+html[data-motion="paused"] .eco-dot::after {
+  animation: none;
+}
+
+/* Hero schematic (components/hero/hackathon-network.tsx). One loop of
+   --cycle: a pulse crosses each connector in the first sixth of the loop
+   (offset by --delay), then rests, so the signal visibly travels step by
+   step; each chip's light pings as the signal arrives. */
+.flow-pulse {
+  stroke-dasharray: 16 200;
+  stroke-dashoffset: 16;
+  animation: flow-pulse var(--cycle, 4.8s) linear infinite;
   animation-delay: var(--delay, 0s);
 }
-@keyframes trace-pulse {
-  from {
-    stroke-dashoffset: 7;
+@keyframes flow-pulse {
+  0% {
+    stroke-dashoffset: 16;
   }
-  to {
+  16.6%,
+  100% {
     stroke-dashoffset: -100;
   }
 }
+.flow-node {
+  opacity: 0.45;
+  animation: flow-node var(--cycle, 4.8s) ease-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes flow-node {
+  0% {
+    opacity: 1;
+  }
+  30%,
+  100% {
+    opacity: 0.45;
+  }
+}
+.flow-ring {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: flow-ring var(--cycle, 4.8s) ease-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes flow-ring {
+  0% {
+    opacity: 0.5;
+    transform: scale(0.4);
+  }
+  20%,
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
 .node-blink {
   animation: node-blink 2.8s ease-in-out infinite;
   animation-delay: var(--delay, 0s);
@@ -420,12 +482,44 @@ html.js [data-reveal].is-in {
   html.js [data-reveal]:not(.is-in) {
     opacity: 1;
   }
-  .trace-pulse,
+  .flow-pulse,
+  .flow-ring,
   .eco-track::after {
     display: none;
+  }
+  .flow-node {
+    opacity: 1;
   }
   .spin {
     animation-duration: 0.8s !important;
     animation-iteration-count: infinite !important;
+  }
+}
+
+/* Print: every piece of content visible and static, no decorative loops, and
+   the fixed header (print:static in navbar.tsx) back in the flow. */
+@media print {
+  html.js [data-reveal],
+  html.js [data-reveal]:not(.is-in) {
+    opacity: 1;
+    animation: none;
+  }
+  .rise-line > span,
+  .fade-in,
+  .page-enter,
+  .node-blink,
+  .eco-index,
+  .eco-dot::after {
+    animation: none;
+  }
+  .flow-pulse,
+  .flow-ring,
+  .eco-track::after,
+  .xp-progress {
+    display: none;
+  }
+  .flow-node {
+    animation: none;
+    opacity: 1;
   }
 }

@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { NoteForm, StatusForm } from "@/components/admin/forms";
-import { StatusBadge } from "@/components/admin/status-badge";
+import { ContactForm, DeleteLeadForm, NoteForm, StatusForm } from "@/components/admin/forms";
+import { NotifyFailedBadge, StatusBadge } from "@/components/admin/status-badge";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getLeadStore } from "@/lib/leads/store";
-import { formatDate } from "@/lib/utils";
-import { eventFormats, eventTypes, labelFor, participantRanges, timelines } from "@/lib/validation/lead";
+import { formatDate, formatLocation } from "@/lib/utils";
+import { allEventTypes, eventFormats, labelFor, participantRanges, timelines } from "@/lib/validation/lead";
 
 export const metadata = { title: "Lead" };
 
@@ -44,10 +44,13 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
         <div>
           <h1 className="text-3xl font-medium tracking-[-0.035em]">{lead.institution}</h1>
           <p className="mt-2 text-mute">
-            {lead.city}, {lead.state} · received {formatDate(lead.createdAt, true)}
+            {formatLocation(lead)} · received {formatDate(lead.createdAt, true)}
           </p>
         </div>
-        <StatusBadge status={lead.status} className="mt-2 text-sm" />
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {lead.notifyStatus === "failed" && <NotifyFailedBadge className="text-sm" />}
+          <StatusBadge status={lead.status} className="text-sm" />
+        </div>
       </div>
 
       <div className="mt-10 grid gap-8 lg:grid-cols-12">
@@ -71,11 +74,42 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
               ],
             ]}
           />
+          <details className="group rounded-md border border-line bg-white">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-3.5 text-sm font-medium hover:text-signal [&::-webkit-details-marker]:hidden">
+              Edit contact details
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 16 16"
+                className="size-4 text-mute transition-transform duration-200 group-open:rotate-180"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M4 6l4 4 4-4" />
+              </svg>
+            </summary>
+            <div className="border-t border-line p-5">
+              <p className="mb-5 text-sm text-mute">
+                Correct details when the person asks (or when they were mistyped). Validated like the contact form.
+              </p>
+              <ContactForm
+                id={lead.id}
+                lead={{
+                  name: lead.name,
+                  designation: lead.designation,
+                  email: lead.email,
+                  phone: lead.phone,
+                  institution: lead.institution,
+                  city: lead.city,
+                }}
+              />
+            </div>
+          </details>
           <Block
             title="Institution"
             rows={[
               ["Institution", lead.institution],
-              ["Location", `${lead.city}, ${lead.state}`],
+              ["Location", formatLocation(lead)],
               [
                 "Website",
                 lead.website && /^https?:\/\//.test(lead.website) ? (
@@ -91,7 +125,7 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
           <Block
             title="Event requirements"
             rows={[
-              ["Event type", labelFor(eventTypes, lead.eventType)],
+              ["Event type", labelFor(allEventTypes, lead.eventType)],
               ["Expected participants", labelFor(participantRanges, lead.participants)],
               ["Format", labelFor(eventFormats, lead.format)],
               ["Timeline", labelFor(timelines, lead.timeline)],
@@ -123,6 +157,16 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
                 ))}
               </ol>
             )}
+          </section>
+
+          <section className="rounded-md border border-danger/20 bg-white p-5">
+            <h2 className="text-sm font-medium">Delete lead</h2>
+            <p className="mt-1.5 text-sm text-mute">
+              For deletion requests under the privacy policy. Removes the lead and its notes permanently.
+            </p>
+            <div className="mt-4">
+              <DeleteLeadForm id={lead.id} />
+            </div>
           </section>
         </div>
       </div>

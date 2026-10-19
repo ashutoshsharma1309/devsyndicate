@@ -1,12 +1,13 @@
 import Link from "next/link";
-import { StatusBadge } from "@/components/admin/status-badge";
+import { FlashToast } from "@/components/admin/forms";
+import { NotifyFailedBadge, StatusBadge } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/field";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getLeadStore } from "@/lib/leads/store";
 import { isLeadStatus, leadStatuses } from "@/lib/leads/types";
-import { formatDate } from "@/lib/utils";
-import { eventFormats, eventTypes, labelFor, participantRanges } from "@/lib/validation/lead";
+import { formatDate, formatLocation } from "@/lib/utils";
+import { allEventTypes, eventFormats, labelFor, participantRanges } from "@/lib/validation/lead";
 
 export const metadata = { title: "Leads" };
 
@@ -20,15 +21,18 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
   const filters = {
     q: q || undefined,
     status: isLeadStatus(status) ? status : undefined,
-    eventType: eventTypes.some((t) => t.value === type) ? type : undefined,
+    eventType: allEventTypes.some((t) => t.value === type) ? type : undefined,
   };
 
   const store = await getLeadStore();
   const leads = store ? await store.list(filters) : [];
   const filtered = Boolean(filters.q || filters.status || filters.eventType);
+  // Set by the deleteLead action's redirect.
+  const deleted = one(sp.deleted) === "1";
 
   return (
     <div>
+      {deleted && <FlashToast message="Lead and its notes deleted." param="deleted" />}
       <div className="flex flex-wrap items-baseline justify-between gap-4">
         <h1 className="text-3xl font-medium tracking-[-0.035em]">Leads</h1>
         <p className="text-sm tabular-nums text-mute" aria-live="polite">
@@ -58,7 +62,7 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
         </label>
         <Select id="type" name="type" defaultValue={filters.eventType ?? ""}>
           <option value="">All event types</option>
-          {eventTypes.map((t) => (
+          {allEventTypes.map((t) => (
             <option key={t.value} value={t.value}>
               {t.label}
             </option>
@@ -101,21 +105,24 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
                       {l.institution}
                     </Link>
                     <div className="mt-0.5 text-mute">
-                      {l.city}, {l.state}
+                      {formatLocation(l)}
                     </div>
                   </td>
                   <td className="px-5 py-4 align-top">
                     <div>{l.name}</div>
-                    <div className="mt-0.5 text-mute">{l.designation}</div>
+                    {l.designation && <div className="mt-0.5 text-mute">{l.designation}</div>}
                   </td>
                   <td className="px-5 py-4 align-top">
-                    <div>{labelFor(eventTypes, l.eventType)}</div>
+                    <div>{labelFor(allEventTypes, l.eventType)}</div>
                     <div className="mt-0.5 text-mute">
                       {labelFor(participantRanges, l.participants)} · {labelFor(eventFormats, l.format)}
                     </div>
                   </td>
                   <td className="px-5 py-4 align-top">
-                    <StatusBadge status={l.status} />
+                    <div className="flex flex-col items-start gap-1.5">
+                      <StatusBadge status={l.status} />
+                      {l.notifyStatus === "failed" && <NotifyFailedBadge />}
+                    </div>
                   </td>
                   <td className="whitespace-nowrap px-5 py-4 text-right align-top tabular-nums text-mute">
                     {formatDate(l.createdAt)}

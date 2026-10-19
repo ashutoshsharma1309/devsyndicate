@@ -1,5 +1,6 @@
 import { ButtonLink } from "@/components/ui/button";
 import { Magnetic } from "@/components/ui/magnetic";
+import { MotionToggle } from "@/components/ui/motion-toggle";
 import { trustPoints } from "@/lib/content";
 import { HackathonNetwork } from "./hackathon-network";
 
@@ -26,7 +27,8 @@ export function HomeHero() {
         <h1 id="hero-title" className="t-display mt-7 max-w-[13ch] md:max-w-none">
           {headline.map((line, i) => (
             <span key={line} className="rise-line" style={{ ["--i" as string]: i }}>
-              <span>{line}</span>
+              {/* Trailing space keeps the heading's text content readable ("national-level hackathon"). */}
+              <span>{i < headline.length - 1 ? `${line} ` : line}</span>
             </span>
           ))}
         </h1>
@@ -55,15 +57,21 @@ export function HomeHero() {
         </div>
 
         <figure
+          data-ambient
           className="fade-in mt-16 rounded-md border border-white/[0.09] bg-carbon/60 backdrop-blur-sm md:mt-20"
           style={{ ["--delay" as string]: "620ms" }}
         >
-          <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3 md:px-6">
+          <div className="flex items-center justify-between gap-4 border-b border-white/[0.07] px-4 py-3 md:px-6">
             <figcaption className="t-label text-mute-dark">Fig. 01 — The hackathon network</figcaption>
-            <span className="t-label hidden items-center gap-2 text-mute-dark sm:flex">
-              <span aria-hidden="true" className="node-blink inline-block size-1.5 rounded-full bg-signal-soft" />
-              One partner, every connection
-            </span>
+            {/* The pause control stays visible at every width; only the tagline drops on mobile. */}
+            <div className="flex items-center gap-4">
+              <span className="t-label hidden items-center gap-2 text-mute-dark sm:flex">
+                <span aria-hidden="true" className="node-blink inline-block size-1.5 rounded-full bg-signal-soft" />
+                One partner, every connection
+              </span>
+              <span aria-hidden="true" className="hidden h-3 w-px bg-white/10 sm:block" />
+              <MotionToggle />
+            </div>
           </div>
           <div className="px-3 py-6 md:px-8 md:py-10">
             <HackathonNetwork />

@@ -5,10 +5,22 @@
  */
 import * as z from "zod/mini";
 
+/** Enquiry types offered on the form. */
 export const eventTypes = [
   { value: "campus", label: "Campus Hackathon" },
   { value: "national", label: "National Hackathon" },
   { value: "industry", label: "Industry Challenge" },
+  { value: "sponsorship", label: "Sponsorship or Partnership" },
+  { value: "general", label: "General Enquiry" },
+] as const;
+
+/**
+ * Every enquiry type the API accepts and the admin can label: the current
+ * options plus ones offered by earlier versions of the form, so stored leads
+ * keep their labels and filters.
+ */
+export const allEventTypes = [
+  ...eventTypes,
   { value: "innovation", label: "Innovation Challenge" },
   { value: "custom", label: "Custom format" },
   { value: "unsure", label: "Not sure yet" },
@@ -80,8 +92,9 @@ export const indianStates = [
 type Option = { readonly value: string; readonly label: string };
 const values = <T extends readonly Option[]>(opts: T) => opts.map((o) => o.value) as [T[number]["value"], ...T[number]["value"][]];
 
+/** Display label for a stored option value. Empty (an optional field left blank) reads as "—". */
 export function labelFor(opts: readonly Option[], value: string) {
-  return opts.find((o) => o.value === value)?.label ?? value;
+  return opts.find((o) => o.value === value)?.label ?? (value || "—");
 }
 
 // Strip control characters (keeps newlines and tabs) before anything is stored or emailed.
@@ -99,12 +112,32 @@ const optionalText = (max: number) =>
     z.transform((v) => clean(v ?? "").trim()),
   ).check(z.maxLength(max, `Keep this under ${max} characters.`));
 
+/** An optional select or radio group: one of `vals`, or "" when left blank. */
+const optionalChoice = <T extends readonly [string, ...string[]]>(vals: T, message: string) =>
+  z._default(z.union([z.literal(""), z.enum(vals)], message), "");
+
 const phoneDigits = (v: string) => v.replace(/\D/g, "");
 
+// Required: name, institution, email, phone and enquiry type. Everything else is
+// optional so the form stays short. City, state, website and theme are kept
+// (optional) for API compatibility and for leads stored by earlier versions.
 export const leadSchema = z.object({
+  name: text(2, 120, "Enter your full name."),
   institution: text(2, 160, "Enter your college or institution name."),
-  city: text(2, 80, "Enter the city."),
-  state: z.enum(indianStates, "Select a state."),
+  email: z.pipe(
+    z.string("Enter your work or institutional email."),
+    z.transform((v) => v.trim().toLowerCase()),
+  ).check(z.email("Enter a valid email address, e.g. name@college.edu.in"), z.maxLength(200, "Keep this under 200 characters.")),
+  phone: text(1, 24, "Enter a phone number.").check(
+    z.refine((v) => /^[+\d][\d\s()-]*$/.test(v) && phoneDigits(v).length >= 10 && phoneDigits(v).length <= 15, {
+      message: "Enter a valid phone number, e.g. +91 98765 43210",
+    }),
+  ),
+  eventType: z.enum(values(allEventTypes), "Choose what your enquiry is about."),
+
+  designation: optionalText(120),
+  city: optionalText(80),
+  state: optionalChoice(indianStates, "Select a state."),
   website: z.pipe(
     optionalText(200),
     z.transform((v) => (v && !/^https?:\/\//i.test(v) ? `https://${v}` : v)),
@@ -113,23 +146,9 @@ export const leadSchema = z.object({
       message: "Enter a valid website, e.g. www.yourcollege.edu.in",
     }),
   ),
-
-  name: text(2, 120, "Enter your name."),
-  designation: text(2, 120, "Enter your designation."),
-  email: z.pipe(
-    z.string("Enter your official email."),
-    z.transform((v) => v.trim().toLowerCase()),
-  ).check(z.email("Enter a valid email address."), z.maxLength(200, "Keep this under 200 characters.")),
-  phone: text(1, 24, "Enter a phone number.").check(
-    z.refine((v) => /^[+\d][\d\s()-]*$/.test(v) && phoneDigits(v).length >= 10 && phoneDigits(v).length <= 15, {
-      message: "Enter a valid phone number, e.g. +91 98765 43210",
-    }),
-  ),
-
-  eventType: z.enum(values(eventTypes), "Choose the kind of event you have in mind."),
-  participants: z.enum(values(participantRanges), "Choose an expected participant range."),
-  format: z.enum(values(eventFormats), "Choose a preferred format."),
-  timeline: z.enum(values(timelines), "Choose a preferred timeline."),
+  participants: optionalChoice(values(participantRanges), "Choose an expected participant range."),
+  format: optionalChoice(values(eventFormats), "Choose a preferred format."),
+  timeline: optionalChoice(values(timelines), "Choose a preferred timeline."),
   theme: optionalText(200),
   message: optionalText(3000),
 });
@@ -140,10 +159,18 @@ export type LeadField = keyof LeadData;
 
 /** Fields the API expects alongside the lead itself — used only for spam checks. */
 export const spamFields = {
-  /** Honeypot. Hidden from people; bots fill it in. */
-  honeypot: "company_url",
-  /** Epoch ms when the form was first rendered. */
-  startedAt: "started_at",
+  /**
+   * Honeypot. Hidden from people; bots fill it in. Deliberately meaningless:
+   * a name like "company_url" gets filled by browser autofill, which would
+   * silently discard real enquiries.
+   */
+  honeypot: "hp_x7k",
+  /**
+   * Milliseconds between the form mounting and submit, measured on the
+   * visitor's monotonic clock (performance.now()). An elapsed time, not a
+   * timestamp, so a visitor whose system clock is wrong isn't rejected.
+   */
+  fillMs: "fill_ms",
 } as const;
 
 /** Minimum time a real person needs to fill in the form. */

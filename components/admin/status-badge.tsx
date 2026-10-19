@@ -25,3 +25,19 @@ export function StatusBadge({ status, className }: { status: LeadStatus; classNa
     </span>
   );
 }
+
+/** Shown when the team notification email for a lead couldn't be sent. */
+export function NotifyFailedBadge({ className }: { className?: string }) {
+  return (
+    <span
+      title="The notification email for this request couldn't be sent. Follow up from here."
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-xs border border-danger/30 bg-danger/5 px-2 py-0.5 text-xs font-medium text-danger",
+        className,
+      )}
+    >
+      <span aria-hidden="true" className="size-1.5 rounded-full bg-current opacity-70" />
+      Email failed
+    </span>
+  );
+}

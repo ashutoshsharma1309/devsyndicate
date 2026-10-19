@@ -3,6 +3,8 @@ import { Magnetic } from "@/components/ui/magnetic";
 import { Container } from "@/components/ui/section";
 import { site } from "@/lib/site";
 
+const inline = "text-white/85 underline decoration-white/20 underline-offset-4 transition-colors duration-200 hover:text-white hover:decoration-white/60";
+
 export function FinalCta({
   title = "Let's build something worth putting your campus behind.",
   body = "Tell us what you have in mind. We'll understand your requirements, recommend an event structure and get back to you for a quick discussion.",
@@ -10,6 +12,7 @@ export function FinalCta({
   title?: string;
   body?: string;
 }) {
+  const contact = site.primaryContact;
   return (
     <section aria-labelledby="cta-title" className="on-dark relative overflow-hidden bg-ink text-white">
       <div
@@ -34,13 +37,23 @@ export function FinalCta({
             </ButtonLink>
           </Magnetic>
           <ButtonLink href={`mailto:${site.email}`} variant="secondary-dark" size="lg">
-            Contact Dev Syndicate
+            Email {site.name}
           </ButtonLink>
         </div>
-        <p className="mt-10 text-sm text-mute-dark">
-          Or call{" "}
-          <a href={site.phone.href} className="text-white/85 underline decoration-white/20 underline-offset-4 hover:text-white">
-            {site.phone.display}
+        <p className="mx-auto mt-10 max-w-xl text-sm leading-relaxed text-mute-dark">
+          Or call {contact.name} on{" "}
+          <a href={contact.phone.href} className={inline}>
+            {contact.phone.display}
+          </a>{" "}
+          · connect on{" "}
+          <a
+            href={contact.linkedin}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={inline}
+          >
+            LinkedIn
+            <span className="sr-only"> (opens in a new tab)</span>
           </a>
         </p>
       </Container>

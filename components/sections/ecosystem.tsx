@@ -28,6 +28,7 @@ export function EcosystemSection() {
         </div>
 
         <ol
+          data-ambient
           className="eco relative mt-16 grid gap-0 md:mt-24 lg:grid-cols-6"
           style={{ ["--eco-n" as string]: n }}
         >

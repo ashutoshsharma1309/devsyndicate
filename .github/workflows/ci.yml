@@ -1,0 +1,53 @@
+# Lint, typecheck, unit tests, production build, then a smoke test against the
+# built site. Needs no secrets: without DATABASE_URL or SMTP_HOST the app runs
+# with its development fallbacks, and the smoke test never submits a valid lead.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_SITE_URL: https://www.devsyndicate.co.in
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Start production server
+        run: |
+          npx next start -p 3000 > next-start.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fsS -o /dev/null http://localhost:3000/robots.txt; then exit 0; fi
+            sleep 1
+          done
+          echo "Server did not respond within 60 seconds"
+          cat next-start.log
+          exit 1
+
+      - name: Smoke test
+        run: npm run smoke
+        env:
+          BASE_URL: http://localhost:3000
+
+      - name: Server log
+        if: failure()
+        run: cat next-start.log || true

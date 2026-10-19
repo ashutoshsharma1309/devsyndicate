@@ -14,6 +14,9 @@ export type LeadStatus = (typeof leadStatuses)[number]["value"];
 
 export const isLeadStatus = (v: unknown): v is LeadStatus => leadStatuses.some((s) => s.value === v);
 
+/** Outcome of the team notification email for a stored lead. */
+export type NotifyStatus = "sent" | "failed";
+
 export type Lead = LeadData & {
   id: string;
   status: LeadStatus;
@@ -21,7 +24,16 @@ export type Lead = LeadData & {
   updatedAt: string;
   /** Where the request came from (page path), for later attribution. */
   source: string | null;
+  /**
+   * Whether the notification email went out. null/undefined: not recorded yet
+   * (still sending, no mailer, or a lead stored before this was tracked).
+   */
+  notifyStatus?: NotifyStatus | null;
 };
+
+/** Contact fields the admin can correct (privacy policy: right to correction). */
+export const contactFields = ["name", "designation", "email", "phone", "institution", "city"] as const;
+export type ContactFields = Partial<Pick<Lead, (typeof contactFields)[number]>>;
 
 export type LeadNote = {
   id: string;
@@ -52,4 +64,12 @@ export interface LeadStore {
   countByStatus(): Promise<Record<LeadStatus, number>>;
   /** Submissions from the same IP hash since `since`. */
   countRecent(ipHash: string, since: Date): Promise<number>;
+  /** Records whether the notification email for this lead was sent. Doesn't touch updatedAt. */
+  markNotified(id: string, status: NotifyStatus): Promise<void>;
+  /** Permanently removes the lead and its notes (privacy policy: right to deletion). */
+  delete(id: string): Promise<void>;
+  /** Corrects contact details; bumps updatedAt. Only the given fields change. */
+  updateContact(id: string, fields: ContactFields): Promise<void>;
+  /** Cheap connectivity check. Throws if the store can't be reached. */
+  ping(): Promise<void>;
 }

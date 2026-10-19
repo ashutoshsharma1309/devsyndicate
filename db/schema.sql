@@ -42,3 +42,8 @@ create table if not exists lead_notes (
 );
 
 create index if not exists lead_notes_lead_id_idx on lead_notes (lead_id, created_at);
+
+-- Added later; safe to re-run on existing databases. null = not recorded
+-- (still sending, no mailer configured, or stored before this was tracked).
+alter table leads add column if not exists notify_status text
+  check (notify_status in ('sent','failed'));

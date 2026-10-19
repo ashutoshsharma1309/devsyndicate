@@ -37,7 +37,9 @@ export async function startSession() {
   (await cookies()).set(SESSION_COOKIE, await signSession(), {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "strict",
+    // Lax, not strict: a link from a mail app (cross-site) must arrive signed in.
+    // Cross-site POSTs still carry no cookie, and server actions also check Origin.
+    sameSite: "lax",
     path: "/admin",
     maxAge: SESSION_TTL_SECONDS,
   });

@@ -1,8 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ImageResponse } from "next/og";
+import { OG_IMAGE_ALT } from "@/lib/seo";
 
-export const alt = "Dev Syndicate — Bring a national-level hackathon to your campus";
+export const alt = OG_IMAGE_ALT;
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 

@@ -1,19 +1,23 @@
+import { PageJsonLd } from "@/components/layout/json-ld";
 import { PageHero } from "@/components/layout/page-hero";
 import { FinalCta } from "@/components/sections/final-cta";
 import { FormatsSection } from "@/components/sections/formats";
 import { ButtonLink } from "@/components/ui/button";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
 import { lifecycle, partnerOptions, phaseIntros, type Phase } from "@/lib/content";
-import { jsonLd, pageMetadata } from "@/lib/seo";
+import { jsonLd, pageMetadata, type PageSeo } from "@/lib/seo";
 import { site } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
-export const metadata = pageMetadata({
-  title: "Hackathon Services",
+const page: PageSeo = {
+  title: "Hackathon Management Services for Colleges",
+  breadcrumb: "Services",
   description:
-    "Strategy, branding, marketing, registrations, mentors and judges, evaluation, event execution and post-event reporting — everything a college hackathon needs, from one team.",
+    "End-to-end hackathon management for colleges: strategy, branding, outreach, registrations, mentors and judges, evaluation, execution and post-event reporting.",
   path: "/services",
-});
+};
+
+export const metadata = pageMetadata(page);
 
 const phases: Phase[] = ["Plan", "Build-up", "Live", "After"];
 
@@ -22,7 +26,7 @@ function servicesJsonLd() {
     "@context": "https://schema.org",
     "@type": "Service",
     serviceType: "Hackathon planning and management",
-    provider: { "@type": "Organization", name: site.name, url: site.url },
+    provider: { "@id": `${site.url}/#organization` },
     areaServed: { "@type": "Country", name: "India" },
     audience: { "@type": "Audience", audienceType: "Colleges and educational institutions" },
     hasOfferCatalog: {
@@ -39,6 +43,7 @@ function servicesJsonLd() {
 export default function ServicesPage() {
   return (
     <>
+      <PageJsonLd page={page} />
       <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(servicesJsonLd())} />
       <PageHero
         eyebrow="Services"
@@ -139,7 +144,7 @@ export default function ServicesPage() {
                 you&apos;d like to be involved.
               </p>
               <ButtonLink
-                href={`mailto:${site.email}?subject=${encodeURIComponent("Partnering on a hackathon")}`}
+                href="/contact?type=sponsorship#enquiry"
                 size="lg"
                 arrow
                 className="mt-10"

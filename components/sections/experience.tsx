@@ -1,6 +1,8 @@
 "use client";
 
+import { Pause, Play } from "lucide-react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useMotionPaused } from "@/components/ui/motion-toggle";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
 import { journey } from "@/lib/content";
 import { cn } from "@/lib/utils";
@@ -10,11 +12,17 @@ const STEP_MS = 3600;
 
 /**
  * The participant journey as a product-style interface. Auto-advances while
- * visible; pauses on hover/focus and never runs with reduced motion.
+ * visible. Hover/focus pauses it only for as long as it lasts; choosing a tab
+ * or pressing the pause button stops it until the visitor presses play (on
+ * touch, pointerleave fires right after a tap, so a hover pause alone would
+ * resume it). Never runs with reduced motion or while animation is paused
+ * site-wide (components/ui/motion-toggle.tsx).
  */
 export function ExperienceSection() {
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [userPaused, setUserPaused] = useState(false);
+  const motionPaused = useMotionPaused();
   const [visible, setVisible] = useState(false);
   const [reduced, setReduced] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -33,7 +41,8 @@ export function ExperienceSection() {
     };
   }, []);
 
-  const running = visible && !paused && !reduced;
+  const canRun = !reduced && !motionPaused;
+  const running = visible && !paused && !userPaused && canRun;
   useEffect(() => {
     if (!running) return;
     const t = setTimeout(() => setActive((a) => (a + 1) % journey.length), STEP_MS);
@@ -42,7 +51,7 @@ export function ExperienceSection() {
 
   const select = (i: number, focus = false) => {
     setActive(i);
-    setPaused(true);
+    setUserPaused(true);
     if (focus) tabRefs.current[i]?.focus();
   };
 
@@ -98,6 +107,10 @@ export function ExperienceSection() {
             onPointerEnter={() => setPaused(true)}
             onPointerLeave={() => setPaused(false)}
             onFocusCapture={() => setPaused(true)}
+            onBlurCapture={(e) => {
+              // Resume once focus has left the slideshow entirely (not when moving between its tabs).
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaused(false);
+            }}
           >
             <figure className="overflow-hidden rounded-md border border-white/[0.09] bg-carbon shadow-[0_40px_80px_-40px_rgb(0_0_0/0.8)]">
               <div className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3 md:px-5">
@@ -107,9 +120,30 @@ export function ExperienceSection() {
                   <span className="size-2 rounded-full bg-white/15" />
                 </span>
                 <figcaption className="t-label text-mute-dark">Participant view · illustrative</figcaption>
-                <span className="t-label hidden text-mute-dark sm:inline">
-                  {String(active + 1).padStart(2, "0")} / {String(journey.length).padStart(2, "0")}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="t-label hidden text-mute-dark sm:inline">
+                    {String(active + 1).padStart(2, "0")} / {String(journey.length).padStart(2, "0")}
+                  </span>
+                  {/* Nothing to control when the slideshow can't run at all. */}
+                  {canRun && (
+                    <button
+                      type="button"
+                      aria-label={userPaused ? "Play slideshow" : "Pause slideshow"}
+                      onClick={() => {
+                        // Play resumes straight away, even under the pointer or focus.
+                        if (userPaused) setPaused(false);
+                        setUserPaused(!userPaused);
+                      }}
+                      className="-m-1.5 inline-flex size-6 items-center justify-center rounded-xs text-mute-dark transition-colors duration-200 hover:text-white"
+                    >
+                      {userPaused ? (
+                        <Play aria-hidden="true" className="size-3" strokeWidth={2} />
+                      ) : (
+                        <Pause aria-hidden="true" className="size-3" strokeWidth={2} />
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="grid md:grid-cols-[13rem_1fr]">

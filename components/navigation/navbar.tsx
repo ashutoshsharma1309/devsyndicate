@@ -32,10 +32,22 @@ export function Navbar() {
 
   useEffect(() => {
     if (!open) return;
+    // The menu only exists below md (its button is md:hidden). If the viewport grows past md
+    // while it's open (rotation, resizing), close it — otherwise the page behind would stay
+    // inert and scroll-locked with no visible way to close the menu.
+    const desktop = window.matchMedia("(min-width: 48rem)");
+    const closeOnDesktop = () => desktop.matches && setOpen(false);
+    desktop.addEventListener("change", closeOnDesktop);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const panel = panelRef.current;
     panel?.querySelector<HTMLElement>("a")?.focus();
+    // Take the page behind the menu out of reach of keyboard and screen readers
+    // (the focus trap below only covers Tab).
+    const behind = [document.getElementById("main"), document.querySelector<HTMLElement>("#main ~ footer")].filter(
+      (el): el is HTMLElement => el !== null,
+    );
+    behind.forEach((el) => (el.inert = true));
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -61,7 +73,9 @@ export function Navbar() {
     };
     document.addEventListener("keydown", onKey);
     return () => {
+      desktop.removeEventListener("change", closeOnDesktop);
       document.body.style.overflow = prev;
+      behind.forEach((el) => (el.inert = false));
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
@@ -71,7 +85,7 @@ export function Navbar() {
   return (
     <header
       className={cn(
-        "on-dark fixed inset-x-0 top-0 z-50 transition-[background-color,border-color,backdrop-filter] duration-500",
+        "on-dark fixed inset-x-0 top-0 z-50 print:static transition-[background-color,border-color,backdrop-filter] duration-500",
         // No backdrop-filter while the menu is open: it would become the containing
         // block for the fixed mobile panel and collapse it to the header's height.
         open
@@ -155,7 +169,7 @@ export function Navbar() {
         id="mobile-menu"
         ref={panelRef}
         hidden={!open}
-        className="fixed inset-x-0 bottom-0 top-16 overflow-y-auto border-t border-white/[0.07] bg-ink md:hidden"
+        className="fixed inset-x-0 bottom-0 top-16 overflow-y-auto overscroll-contain border-t border-white/[0.07] bg-ink md:hidden"
       >
         <nav aria-label="Mobile" className="container-x flex min-h-full flex-col pb-10 pt-6">
           <ul className="divide-y divide-white/[0.07] border-b border-white/[0.07]">
@@ -182,8 +196,9 @@ export function Navbar() {
               <a className="block py-1 hover:text-white" href={`mailto:${site.email}`}>
                 {site.email}
               </a>
-              <a className="block py-1 hover:text-white" href={site.phone.href}>
-                {site.phone.display}
+              <a className="block py-1 hover:text-white" href={site.primaryContact.phone.href}>
+                {site.primaryContact.phone.display}
+                <span> · {site.primaryContact.name}</span>
               </a>
             </div>
           </div>

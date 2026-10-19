@@ -2,13 +2,17 @@ import Image from "next/image";
 import { connection } from "next/server";
 import { LoginForm } from "@/components/admin/forms";
 import { adminConfigured } from "@/lib/auth/admin";
+import { safeAdminPath } from "@/lib/auth/session";
 
 export const metadata = { title: "Sign in" };
 
-export default async function AdminLoginPage() {
+export default async function AdminLoginPage({ searchParams }: PageProps<"/admin/login">) {
   // Read env at request time, not build time.
   await connection();
   const configured = adminConfigured();
+  // Set by proxy.ts when a signed-out visit to an admin page was redirected here.
+  const { next } = await searchParams;
+  const nextPath = safeAdminPath(Array.isArray(next) ? next[0] : next) ?? undefined;
   return (
     <main className="grid min-h-dvh place-items-center px-4 py-16">
       <div className="w-full max-w-sm">
@@ -27,7 +31,7 @@ export default async function AdminLoginPage() {
           </p>
         )}
         <div className="mt-8 rounded-md border border-line bg-white p-6">
-          <LoginForm disabled={!configured} />
+          <LoginForm disabled={!configured} next={nextPath} />
         </div>
       </div>
     </main>

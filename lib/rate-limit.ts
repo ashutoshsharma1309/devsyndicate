@@ -32,6 +32,7 @@ export function clientIp(headers: Headers) {
 
 /** Salted, truncated hash so raw IP addresses are never stored. */
 export function hashIp(ip: string) {
-  const salt = process.env.IP_HASH_SALT ?? process.env.SESSION_SECRET ?? "dev-syndicate";
+  // `||`, not `??`: .env.example ships IP_HASH_SALT empty, and an empty salt must fall through.
+  const salt = process.env.IP_HASH_SALT || process.env.SESSION_SECRET || "dev-syndicate";
   return createHash("sha256").update(`${salt}:${ip}`).digest("hex").slice(0, 32);
 }

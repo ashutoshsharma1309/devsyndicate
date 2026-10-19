@@ -1,20 +1,25 @@
 import { LegalPage } from "@/components/layout/legal";
-import { pageMetadata } from "@/lib/seo";
+import { PageJsonLd } from "@/components/layout/json-ld";
+import { pageMetadata, type PageSeo } from "@/lib/seo";
 import { site } from "@/lib/site";
 
-export const metadata = pageMetadata({
+const page: PageSeo = {
   title: "Privacy Policy",
   description: "How Dev Syndicate collects, uses and protects the information you share through this website.",
   path: "/privacy",
-});
+};
+
+export const metadata = pageMetadata(page);
 
 const mail = <a href={`mailto:${site.email}`}>{site.email}</a>;
 
 export default function PrivacyPage() {
   return (
-    <LegalPage
+    <>
+      <PageJsonLd page={page} />
+      <LegalPage
       title="Privacy Policy"
-      updated="4 October 2026"
+      updated="20 October 2026"
       intro={`This policy explains what information ${site.name} collects through this website, why, and what you can ask us to do with it.`}
       sections={[
         {
@@ -23,13 +28,18 @@ export default function PrivacyPage() {
           body: (
             <>
               <p>
-                <strong>Information you give us.</strong> When you submit the hackathon request form, we collect the
-                details you enter: your name, designation, official email address and phone number; your
-                institution&apos;s name, city, state and website; and the event details you share (event type,
-                expected participants, format, timeline, theme and any additional requirements).
+                <strong>Information you give us.</strong> When you submit the enquiry form, we collect the details
+                you enter: your name, work or institutional email address and phone number; your institution&apos;s
+                name; the type of enquiry; and anything optional you choose to add (your designation, city, expected
+                participants, preferred format, timeline and additional requirements).
               </p>
               <p>
                 If you email or call us directly, we receive whatever information you choose to include.
+              </p>
+              <p>
+                <strong>Where your enquiry came from.</strong> With the form, we also record the page you submitted it
+                from and, if available, the page you first arrived on and the website that referred you. This helps us
+                understand how colleges find us. We don&apos;t track your browsing in any other way.
               </p>
               <p>
                 <strong>Technical information.</strong> To protect the form from spam and abuse, we record a one-way,
@@ -46,6 +56,7 @@ export default function PrivacyPage() {
             <>
               <p>We use the information you submit to:</p>
               <ul>
+                <li>send you an automatic email confirming we&apos;ve received your enquiry;</li>
                 <li>review your request and contact you about it;</li>
                 <li>prepare a proposal and plan an event with your institution;</li>
                 <li>keep a record of our conversations with your institution;</li>
@@ -120,6 +131,10 @@ export default function PrivacyPage() {
                 law, including the Digital Personal Data Protection Act, 2023 where it applies.
               </p>
               <p>To make a request, or to raise a concern about how we&apos;ve handled your information, email {mail}.</p>
+              <p>
+                If you&apos;re not satisfied with our response, you may also complain to the Data Protection Board of
+                India under the Digital Personal Data Protection Act, 2023.
+              </p>
             </>
           ),
         },
@@ -145,5 +160,6 @@ export default function PrivacyPage() {
         },
       ]}
     />
+    </>
   );
 }

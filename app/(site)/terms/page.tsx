@@ -1,17 +1,22 @@
 import Link from "next/link";
 import { LegalPage } from "@/components/layout/legal";
-import { pageMetadata } from "@/lib/seo";
+import { PageJsonLd } from "@/components/layout/json-ld";
+import { pageMetadata, type PageSeo } from "@/lib/seo";
 import { site } from "@/lib/site";
 
-export const metadata = pageMetadata({
+const page: PageSeo = {
   title: "Terms and Conditions",
   description: "The terms that apply when you use the Dev Syndicate website.",
   path: "/terms",
-});
+};
+
+export const metadata = pageMetadata(page);
 
 export default function TermsPage() {
   return (
-    <LegalPage
+    <>
+      <PageJsonLd page={page} />
+      <LegalPage
       title="Terms and Conditions"
       updated="4 October 2026"
       intro={`These terms apply to your use of this website. By using it, you agree to them. If you don't agree, please don't use the site.`}
@@ -131,5 +136,6 @@ export default function TermsPage() {
         },
       ]}
     />
+    </>
   );
 }

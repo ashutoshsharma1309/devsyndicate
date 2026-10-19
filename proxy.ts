@@ -1,18 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
+import { safeAdminPath, SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
 
 /**
  * Optimistic gate for /admin. Every admin page and action also calls
  * requireAdmin(), so this is a fast first check, not the only one.
  */
 export async function proxy(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+  const { pathname, search, searchParams } = req.nextUrl;
   const authed = await verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
 
   if (pathname === "/admin/login") {
-    return authed ? NextResponse.redirect(new URL("/admin/leads", req.url)) : withNoIndex(NextResponse.next());
+    if (!authed) return withNoIndex(NextResponse.next());
+    const next = safeAdminPath(searchParams.get("next")) ?? "/admin/leads";
+    return NextResponse.redirect(new URL(next, req.url));
   }
-  if (!authed) return NextResponse.redirect(new URL("/admin/login", req.url));
+  if (!authed) {
+    // Remember where they were going (e.g. a lead linked from the notification email).
+    const login = new URL("/admin/login", req.url);
+    const next = safeAdminPath(pathname + search);
+    if (next) login.searchParams.set("next", next);
+    return NextResponse.redirect(login);
+  }
   return withNoIndex(NextResponse.next());
 }
 

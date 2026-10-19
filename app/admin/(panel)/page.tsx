@@ -1,23 +1,63 @@
 import Link from "next/link";
 import { StatusBadge } from "@/components/admin/status-badge";
 import { requireAdmin } from "@/lib/auth/admin";
+import { getMailer } from "@/lib/email";
 import { getLeadStore } from "@/lib/leads/store";
 import { leadStatuses } from "@/lib/leads/types";
 import { formatDate } from "@/lib/utils";
-import { eventTypes, labelFor } from "@/lib/validation/lead";
+import { allEventTypes, labelFor } from "@/lib/validation/lead";
 
 export const metadata = { title: "Overview" };
 
 export default async function AdminOverviewPage() {
   await requireAdmin();
   const store = await getLeadStore();
-  const [counts, recent] = store ? await Promise.all([store.countByStatus(), store.list()]) : [null, []];
+  const [counts, recent, mailer] = await Promise.all([
+    store?.countByStatus() ?? null,
+    store?.list() ?? [],
+    getMailer(),
+  ]);
   const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
   const open = counts ? total - counts.won - counts.lost : 0;
+  // list() returns the latest 500, which covers every lead at current volumes.
+  const failed = recent.filter((l) => l.notifyStatus === "failed");
 
   return (
     <div>
       <h1 className="text-3xl font-medium tracking-[-0.035em]">Overview</h1>
+
+      {/* getMailer() is null only in production without SMTP settings. */}
+      {!mailer && (
+        <div role="alert" className="mt-6 rounded-md border border-danger/25 bg-danger/5 p-4 text-sm text-danger">
+          <p className="font-medium">Email notifications are off.</p>
+          <p className="mt-1">
+            No mail server is configured, so nobody is emailed about new requests. Set{" "}
+            <code className="font-mono">SMTP_HOST</code> and the other <code className="font-mono">SMTP_*</code>{" "}
+            variables{store ? ", and check this page for new leads until then." : "."}
+          </p>
+        </div>
+      )}
+
+      {failed.length > 0 && (
+        <div role="alert" className="mt-6 rounded-md border border-amber-600/25 bg-amber-500/10 p-4 text-sm text-amber-900">
+          <p className="font-medium">
+            {failed.length === 1
+              ? "1 request's notification email couldn't be sent."
+              : `${failed.length} requests' notification emails couldn't be sent.`}
+          </p>
+          <p className="mt-1">They&apos;re saved here, but nobody was emailed. Follow up on them directly:</p>
+          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            {failed.slice(0, 8).map((l) => (
+              <li key={l.id}>
+                <Link href={`/admin/leads/${l.id}`} className="underline underline-offset-4 hover:text-ink">
+                  {l.institution}
+                </Link>
+              </li>
+            ))}
+            {failed.length > 8 && <li>and {failed.length - 8} more (marked “Email failed” in Leads)</li>}
+          </ul>
+        </div>
+      )}
 
       <dl className="mt-8 grid gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-3">
         {[
@@ -63,7 +103,7 @@ export default async function AdminOverviewPage() {
             <li key={l.id}>
               <Link href={`/admin/leads/${l.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-4 hover:bg-paper">
                 <span className="min-w-0 flex-1 truncate font-medium">{l.institution}</span>
-                <span className="text-sm text-mute">{labelFor(eventTypes, l.eventType)}</span>
+                <span className="text-sm text-mute">{labelFor(allEventTypes, l.eventType)}</span>
                 <StatusBadge status={l.status} />
                 <span className="w-28 text-right text-sm tabular-nums text-mute">{formatDate(l.createdAt)}</span>
               </Link>

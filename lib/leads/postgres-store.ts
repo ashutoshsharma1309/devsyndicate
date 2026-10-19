@@ -1,6 +1,16 @@
 import "server-only";
 import postgres from "postgres";
-import { leadStatuses, type Lead, type LeadFilters, type LeadNote, type LeadStatus, type LeadStore, type NewLead } from "./types";
+import {
+  contactFields,
+  leadStatuses,
+  type Lead,
+  type LeadFilters,
+  type LeadNote,
+  type LeadStatus,
+  type LeadStore,
+  type NewLead,
+  type NotifyStatus,
+} from "./types";
 
 type Row = {
   id: string;
@@ -22,6 +32,8 @@ type Row = {
   theme: string;
   message: string;
   source: string | null;
+  /** Absent until `npm run db:setup` has added the column. */
+  notify_status?: NotifyStatus | null;
 };
 
 const toLead = (r: Row): Lead => ({
@@ -44,6 +56,7 @@ const toLead = (r: Row): Lead => ({
   theme: r.theme,
   message: r.message,
   source: r.source,
+  notifyStatus: r.notify_status ?? null,
 });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -141,5 +154,29 @@ export const postgresStore: LeadStore = {
     const [r] = await db()<{ n: number }[]>`
       select count(*)::int as n from leads where ip_hash = ${ipHash} and created_at >= ${since}`;
     return r?.n ?? 0;
+  },
+
+  async markNotified(id, status) {
+    if (!UUID.test(id)) return;
+    await db()`update leads set notify_status = ${status} where id = ${id}`;
+  },
+
+  async delete(id) {
+    if (!UUID.test(id)) return;
+    // lead_notes.lead_id is `on delete cascade`, so the notes go with it.
+    await db()`delete from leads where id = ${id}`;
+  },
+
+  async updateContact(id, fields) {
+    if (!UUID.test(id)) return;
+    // Whitelist the columns: the keys are interpolated as identifiers.
+    const keys = contactFields.filter((k) => fields[k] !== undefined);
+    if (keys.length === 0) return;
+    const sql = db();
+    await sql`update leads set ${sql(fields, keys)}, updated_at = now() where id = ${id}`;
+  },
+
+  async ping() {
+    await db()`select 1`;
   },
 };

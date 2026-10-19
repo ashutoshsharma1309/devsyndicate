@@ -2,7 +2,8 @@ import { Footer } from "@/components/footer/footer";
 import { Navbar } from "@/components/navigation/navbar";
 import { ButtonLink } from "@/components/ui/button";
 
-export const metadata = { title: "Page not found", robots: { index: false } };
+// Next.js already marks 404 responses noindex.
+export const metadata = { title: "Page not found" };
 
 export default function NotFound() {
   return (

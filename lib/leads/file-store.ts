@@ -2,7 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { leadStatuses, type Lead, type LeadNote, type LeadStatus, type LeadStore } from "./types";
+import { contactFields, leadStatuses, type Lead, type LeadNote, type LeadStatus, type LeadStore } from "./types";
 
 /**
  * Local JSON-file store for development without a database. Not used in
@@ -107,4 +107,32 @@ export const fileStore: LeadStore = {
     const t = since.toISOString();
     return (await load()).leads.filter((l) => l.ipHash === ipHash && l.createdAt >= t).length;
   },
+
+  async markNotified(id, status) {
+    await mutate((db) => {
+      const lead = db.leads.find((l) => l.id === id);
+      if (lead) lead.notifyStatus = status;
+    });
+  },
+
+  async delete(id) {
+    await mutate((db) => {
+      db.leads = db.leads.filter((l) => l.id !== id);
+      db.notes = db.notes.filter((n) => n.leadId !== id);
+    });
+  },
+
+  async updateContact(id, fields) {
+    await mutate((db) => {
+      const lead = db.leads.find((l) => l.id === id);
+      if (!lead) return;
+      for (const k of contactFields) {
+        const v = fields[k];
+        if (v !== undefined) lead[k] = v;
+      }
+      lead.updatedAt = new Date().toISOString();
+    });
+  },
+
+  async ping() {},
 };

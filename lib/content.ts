@@ -349,7 +349,7 @@ export const faqs = [
     a: "There is no fixed package, because no two hackathons are the same size. Cost depends on scale and duration, expected participant count, the event format, how much industry involvement you want, marketing requirements, the judges and mentors involved, and venue and logistics. Tell us what you have in mind and we'll put together a proposal with a clear scope.",
   },
   {
-    q: "Can you organize a national-level hackathon?",
+    q: "Can you organise a national-level hackathon?",
     a: "Yes. National formats open participation to students across colleges, and we handle the outreach, registrations, screening and evaluation that come with that scale.",
   },
   {
