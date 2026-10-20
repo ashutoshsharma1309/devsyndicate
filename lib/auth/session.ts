@@ -15,26 +15,54 @@ function key() {
 
 export const sessionConfigured = () => key() !== null;
 
-export async function signSession() {
+/** Who a session belongs to. sub is an admin account id, or "owner" for the shared password. */
+export type SessionIdentity = { sub: string; name: string; email: string | null };
+
+export const OWNER_SUB = "owner";
+
+/**
+ * /admin/login?ended=1 clears the cookie in proxy.ts. Server Components can't
+ * delete cookies, and a still-signed token for a disabled account would
+ * otherwise bounce between the login page and the panel.
+ */
+export const SESSION_ENDED_PARAM = "ended";
+
+export async function signSession(identity: SessionIdentity) {
   const k = key();
   if (!k) throw new Error("SESSION_SECRET must be set (32+ characters).");
-  return new SignJWT({ role: "admin" })
+  return new SignJWT({ role: "admin", name: identity.name, email: identity.email })
     .setProtectedHeader({ alg: "HS256" })
+    .setSubject(identity.sub)
     .setIssuedAt()
     .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
     .setAudience("ds-admin")
     .sign(k);
 }
 
-export async function verifySessionToken(token: string | undefined) {
+/**
+ * The identity in a valid token, or null. Tokens issued before named accounts
+ * existed carry no sub and are treated as the owner. This only checks the
+ * signature; requireAdmin() also checks that a named account is still active.
+ */
+export async function readSession(token: string | undefined): Promise<SessionIdentity | null> {
   const k = key();
-  if (!k || !token) return false;
+  if (!k || !token) return null;
   try {
     const { payload } = await jwtVerify(token, k, { algorithms: ["HS256"], audience: "ds-admin" });
-    return payload.role === "admin";
+    if (payload.role !== "admin") return null;
+    if (!payload.sub || payload.sub === OWNER_SUB) return { sub: OWNER_SUB, name: "Owner", email: null };
+    return {
+      sub: payload.sub,
+      name: typeof payload.name === "string" ? payload.name : "",
+      email: typeof payload.email === "string" ? payload.email : null,
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function verifySessionToken(token: string | undefined) {
+  return (await readSession(token)) !== null;
 }
 
 /**

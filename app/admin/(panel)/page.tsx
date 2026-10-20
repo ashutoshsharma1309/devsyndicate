@@ -1,30 +1,82 @@
 import Link from "next/link";
-import { StatusBadge } from "@/components/admin/status-badge";
+import { BarList, ChartCard, MonthlyBars, SplitBar } from "@/components/admin/charts";
+import { OrgTypeBadge, orgTypeFill, StatusBadge } from "@/components/admin/status-badge";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getMailer } from "@/lib/email";
 import { getLeadStore } from "@/lib/leads/store";
-import { leadStatuses } from "@/lib/leads/types";
+import {
+  last12Months,
+  leadStatuses,
+  zeroByEventType,
+  zeroByOrgType,
+  zeroByStatus,
+  type Lead,
+  type LeadStats,
+} from "@/lib/leads/types";
 import { formatDate } from "@/lib/utils";
-import { allEventTypes, labelFor } from "@/lib/validation/lead";
+import { allEventTypes, labelFor, orgTypes } from "@/lib/validation/lead";
 
 export const metadata = { title: "Overview" };
 
+const orgSplitLabel = { college: "Colleges", company: "Companies", other: "Other organisations", unknown: "Not recorded" };
+
+/** What the page shows without a store: the same layout, all zeros. */
+const emptyStats = (): LeadStats => ({
+  total: 0,
+  last30Days: 0,
+  byStatus: zeroByStatus(),
+  byOrgType: zeroByOrgType(),
+  byEventType: zeroByEventType(),
+  byMonth: last12Months().map((month) => ({ month, count: 0 })),
+  won: 0,
+  lost: 0,
+  notifyFailed: 0,
+});
+
 export default async function AdminOverviewPage() {
-  await requireAdmin();
+  const session = await requireAdmin();
   const store = await getLeadStore();
-  const [counts, recent, mailer] = await Promise.all([
-    store?.countByStatus() ?? null,
-    store?.list() ?? [],
+  const [stats, latest, mailer] = await Promise.all([
+    store?.stats() ?? emptyStats(),
+    store ? store.list({ pageSize: 8 }).then((p) => p.leads) : ([] as Lead[]),
     getMailer(),
   ]);
-  const total = counts ? Object.values(counts).reduce((a, b) => a + b, 0) : 0;
-  const open = counts ? total - counts.won - counts.lost : 0;
-  // list() returns the latest 500, which covers every lead at current volumes.
-  const failed = recent.filter((l) => l.notifyStatus === "failed");
+  // Only fetched when there is something to list; stats() already has the count.
+  const failed =
+    store && stats.notifyFailed > 0 ? (await store.listAll()).filter((l) => l.notifyStatus === "failed") : [];
+
+  const decided = stats.won + stats.lost;
+  const winRate = decided > 0 ? `${Math.round((stats.won / decided) * 100)}%` : "—";
+  const kpis: { label: string; value: string | number; hint?: string }[] = [
+    { label: "Total requests", value: stats.total },
+    { label: "Last 30 days", value: stats.last30Days },
+    { label: "Colleges", value: stats.byOrgType.college },
+    { label: "Companies", value: stats.byOrgType.company },
+    { label: "Won", value: stats.won },
+    { label: "Win rate", value: winRate, hint: decided > 0 ? `of ${decided} decided` : "none decided yet" },
+  ];
+
+  const orgKeys = [...orgTypes.map((o) => o.value), "unknown"] as const;
+  const eventItems = Object.entries(stats.byEventType)
+    .map(([key, value], i) => ({ key, value, i, label: labelFor(allEventTypes, key) }))
+    // Biggest first; ties keep the form's order so the list doesn't reshuffle at random.
+    .sort((a, b) => b.value - a.value || a.i - b.i);
 
   return (
     <div>
       <h1 className="text-3xl font-medium tracking-[-0.035em]">Overview</h1>
+
+      {session.isOwner && (
+        <div className="mt-6 rounded-md border border-signal/25 bg-signal/5 p-4 text-sm text-ink">
+          <p>
+            You&apos;re signed in with the shared password. Add named admin accounts under{" "}
+            <Link href="/admin/team" className="font-medium text-signal-deep underline underline-offset-4 hover:text-ink">
+              Team
+            </Link>{" "}
+            so actions are attributed to people.
+          </p>
+        </div>
+      )}
 
       {/* getMailer() is null only in production without SMTP settings. */}
       {!mailer && (
@@ -59,18 +111,42 @@ export default async function AdminOverviewPage() {
         </div>
       )}
 
-      <dl className="mt-8 grid gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-3">
-        {[
-          ["Total requests", total],
-          ["Open pipeline", open],
-          ["Won", counts?.won ?? 0],
-        ].map(([k, v]) => (
-          <div key={k} className="bg-white p-5">
-            <dt className="t-label text-mute">{k}</dt>
-            <dd className="mt-2 text-3xl font-medium tabular-nums tracking-[-0.03em]">{v}</dd>
+      <dl className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-3 xl:grid-cols-6">
+        {kpis.map((k) => (
+          <div key={k.label} className="bg-white p-5">
+            <dt className="t-label text-mute">{k.label}</dt>
+            <dd className="mt-2 text-3xl font-medium tabular-nums tracking-[-0.03em]">{k.value}</dd>
+            {k.hint && <dd className="mt-1 text-xs text-mute">{k.hint}</dd>}
           </div>
         ))}
       </dl>
+
+      <div className="mt-8 grid gap-4 lg:grid-cols-2">
+        <ChartCard
+          title="Enquiries per month"
+          description="The last 12 months, India time."
+          className="lg:col-span-2"
+        >
+          <MonthlyBars data={stats.byMonth} />
+        </ChartCard>
+        <ChartCard title="Who’s approaching" description="Every request by organisation type.">
+          <SplitBar
+            label="Requests by organisation type"
+            segments={orgKeys.map((k) => ({
+              key: k,
+              label: orgSplitLabel[k],
+              value: stats.byOrgType[k],
+              fill: orgTypeFill[k],
+            }))}
+          />
+          {stats.byOrgType.unknown > 0 && (
+            <p className="mt-4 text-xs text-mute">“Not recorded”: sent before the form asked for it.</p>
+          )}
+        </ChartCard>
+        <ChartCard title="By enquiry type" description="Every request by what it was about.">
+          <BarList label="Requests by enquiry type" items={eventItems} />
+        </ChartCard>
+      </div>
 
       <h2 className="mt-12 text-lg font-medium tracking-[-0.02em]">Pipeline</h2>
       <ul className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
@@ -81,7 +157,7 @@ export default async function AdminOverviewPage() {
               className="block rounded-md border border-line bg-white p-4 transition-colors hover:border-ink/30"
             >
               <StatusBadge status={s.value} />
-              <span className="mt-3 block text-2xl font-medium tabular-nums">{counts?.[s.value] ?? 0}</span>
+              <span className="mt-3 block text-2xl font-medium tabular-nums">{stats.byStatus[s.value]}</span>
             </Link>
           </li>
         ))}
@@ -93,19 +169,20 @@ export default async function AdminOverviewPage() {
           All leads →
         </Link>
       </div>
-      {recent.length === 0 ? (
+      {latest.length === 0 ? (
         <p className="mt-4 rounded-md border border-dashed border-line p-8 text-center text-sm text-mute">
           No requests yet. New submissions from the contact form appear here.
         </p>
       ) : (
         <ul className="mt-4 divide-y divide-line overflow-hidden rounded-md border border-line bg-white">
-          {recent.slice(0, 6).map((l) => (
+          {latest.map((l) => (
             <li key={l.id}>
               <Link href={`/admin/leads/${l.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-4 hover:bg-paper">
-                <span className="min-w-0 flex-1 truncate font-medium">{l.institution}</span>
+                <span className="min-w-0 flex-1 basis-48 truncate font-medium">{l.institution}</span>
+                <OrgTypeBadge orgType={l.orgType} />
                 <span className="text-sm text-mute">{labelFor(allEventTypes, l.eventType)}</span>
                 <StatusBadge status={l.status} />
-                <span className="w-28 text-right text-sm tabular-nums text-mute">{formatDate(l.createdAt)}</span>
+                <span className="text-sm tabular-nums text-mute sm:w-28 sm:text-right">{formatDate(l.createdAt)}</span>
               </Link>
             </li>
           ))}

@@ -5,6 +5,7 @@ import {
   eventFormats,
   allEventTypes,
   labelFor,
+  orgTypes,
   participantRanges,
   timelines,
   type LeadData,
@@ -19,11 +20,15 @@ const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").slice(0, 120);
 
 /** `source`: the form page plus first-touch attribution (landing page, referrer) — see lib/attribution.ts. */
 export function leadNotification(lead: LeadData, opts: { to: string; id?: string; source?: string | null }): Email {
+  // Enum labels, not visitor text. Missing reads as "—" (leads stored before the field existed).
+  const orgType = labelFor(orgTypes, lead.orgType ?? "");
+  const enquiry = labelFor(allEventTypes, lead.eventType);
   const groups: [string, [string, string][]][] = [
     [
       "Institution",
       [
         ["Institution", lead.institution],
+        ["Organisation type", orgType],
         ["Location", formatLocation(lead)],
         ["Website", lead.website || "—"],
       ],
@@ -40,7 +45,7 @@ export function leadNotification(lead: LeadData, opts: { to: string; id?: string
     [
       "Event",
       [
-        ["Enquiry type", labelFor(allEventTypes, lead.eventType)],
+        ["Enquiry type", enquiry],
         ["Expected participants", labelFor(participantRanges, lead.participants)],
         ["Format", labelFor(eventFormats, lead.format)],
         ["Timeline", labelFor(timelines, lead.timeline)],
@@ -99,7 +104,7 @@ ${
   return {
     to: opts.to,
     replyTo: lead.email,
-    subject: oneLine(`Website enquiry — ${lead.institution} (${labelFor(allEventTypes, lead.eventType)})`),
+    subject: oneLine(`Website enquiry — ${lead.institution} (${lead.orgType ? `${orgType} · ` : ""}${enquiry})`),
     text,
     html,
   };

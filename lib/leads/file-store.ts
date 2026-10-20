@@ -2,23 +2,61 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { contactFields, leadStatuses, type Lead, type LeadNote, type LeadStatus, type LeadStore } from "./types";
+import {
+  activityLimit,
+  contactFields,
+  dateRange,
+  groupOrganisations,
+  istMonth,
+  last12Months,
+  MAX_LIST_ALL,
+  pageOf,
+  searchFields,
+  zeroByEventType,
+  zeroByOrgType,
+  zeroByStatus,
+  type ActivityEntry,
+  type AdminAccount,
+  type Lead,
+  type LeadFilters,
+  type LeadNote,
+  type LeadStore,
+} from "./types";
 
 /**
  * Local JSON-file store for development without a database. Not used in
  * production (serverless file systems are ephemeral) — see lib/leads/store.ts.
  */
 
-type Db = { leads: (Lead & { ipHash: string | null })[]; notes: LeadNote[] };
+type Db = {
+  leads: (Lead & { ipHash: string | null })[];
+  notes: LeadNote[];
+  admins: AdminAccount[];
+  activity: ActivityEntry[];
+  loginFailures: { key: string; at: string }[];
+};
 
 const file = path.join(process.cwd(), ".data", "leads.json");
 
+// Development only, so keep the file readable rather than keeping every entry forever.
+const MAX_ACTIVITY_ENTRIES = 5000;
+const DAY_MS = 24 * 60 * 60_000;
+
 async function load(): Promise<Db> {
+  let raw: Partial<Db> = {};
   try {
-    return JSON.parse(await readFile(file, "utf8")) as Db;
+    raw = JSON.parse(await readFile(file, "utf8")) as Partial<Db>;
   } catch {
-    return { leads: [], notes: [] };
+    // No file yet (or unreadable): start empty.
   }
+  // Files written before admins/activity existed lack those keys.
+  return {
+    leads: raw.leads ?? [],
+    notes: raw.notes ?? [],
+    admins: raw.admins ?? [],
+    activity: raw.activity ?? [],
+    loginFailures: raw.loginFailures ?? [],
+  };
 }
 
 // Serialise writes so concurrent requests can't clobber each other.
@@ -38,10 +76,22 @@ function mutate<T>(fn: (db: Db) => T): Promise<T> {
 }
 
 const strip = (row: Db["leads"][number]): Lead => {
-  const lead: Partial<Db["leads"][number]> = { ...row };
+  const lead: Partial<Db["leads"][number]> = { ...row, orgType: row.orgType ?? "" };
   delete lead.ipHash;
   return lead as Lead;
 };
+
+/** Newest first, matching the Postgres store's order. */
+function matching(leads: Db["leads"], f: Omit<LeadFilters, "page" | "pageSize">) {
+  const q = f.q?.trim().toLowerCase();
+  const { start, end } = dateRange(f);
+  return leads
+    .filter((l) => (!f.status || l.status === f.status) && (!f.eventType || l.eventType === f.eventType))
+    .filter((l) => !f.orgType || (f.orgType === "unknown" ? !l.orgType : l.orgType === f.orgType))
+    .filter((l) => (!start || l.createdAt >= start.toISOString()) && (!end || l.createdAt < end.toISOString()))
+    .filter((l) => !q || searchFields.some((k) => (l[k] ?? "").toLowerCase().includes(q)))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
 
 export const fileStore: LeadStore = {
   kind: "file",
@@ -56,15 +106,13 @@ export const fileStore: LeadStore = {
   },
 
   async list(f = {}) {
-    const q = f.q?.trim().toLowerCase();
-    return (await load()).leads
-      .filter((l) => (!f.status || l.status === f.status) && (!f.eventType || l.eventType === f.eventType))
-      .filter(
-        (l) =>
-          !q ||
-          [l.institution, l.name, l.email, l.city, l.state, l.phone].some((v) => v.toLowerCase().includes(q)),
-      )
-      .map(strip);
+    const { page, pageSize, offset } = pageOf(f);
+    const all = matching((await load()).leads, f);
+    return { leads: all.slice(offset, offset + pageSize).map(strip), total: all.length, page, pageSize };
+  },
+
+  async listAll(f = {}) {
+    return matching((await load()).leads, f).slice(0, MAX_LIST_ALL).map(strip);
   },
 
   async get(id) {
@@ -98,9 +146,46 @@ export const fileStore: LeadStore = {
   },
 
   async countByStatus() {
-    const out = Object.fromEntries(leadStatuses.map((s) => [s.value, 0])) as Record<LeadStatus, number>;
+    const out = zeroByStatus();
     for (const l of (await load()).leads) out[l.status]++;
     return out;
+  },
+
+  async stats() {
+    const { leads } = await load();
+    const byStatus = zeroByStatus();
+    const byOrgType = zeroByOrgType();
+    const byEventType = zeroByEventType();
+    const months = last12Months();
+    const byMonth = new Map(months.map((m) => [m, 0]));
+    const since30 = new Date(Date.now() - 30 * DAY_MS).toISOString();
+    let last30Days = 0;
+    let notifyFailed = 0;
+    for (const l of leads) {
+      byStatus[l.status]++;
+      byOrgType[l.orgType || "unknown"]++;
+      byEventType[l.eventType] = (byEventType[l.eventType] ?? 0) + 1;
+      const m = istMonth(new Date(l.createdAt));
+      if (byMonth.has(m)) byMonth.set(m, byMonth.get(m)! + 1);
+      if (l.createdAt >= since30) last30Days++;
+      if (l.notifyStatus === "failed") notifyFailed++;
+    }
+    return {
+      total: leads.length,
+      last30Days,
+      byStatus,
+      byOrgType,
+      byEventType,
+      byMonth: months.map((month) => ({ month, count: byMonth.get(month)! })),
+      won: byStatus.won,
+      lost: byStatus.lost,
+      notifyFailed,
+    };
+  },
+
+  async organisations(f = {}) {
+    const rows = matching((await load()).leads, {}).slice(0, MAX_LIST_ALL).map(strip);
+    return groupOrganisations(rows, f);
   },
 
   async countRecent(ipHash, since) {
@@ -135,4 +220,99 @@ export const fileStore: LeadStore = {
   },
 
   async ping() {},
+
+  async logActivity(entry) {
+    await mutate((db) => {
+      db.activity.unshift({
+        id: randomUUID(),
+        at: new Date().toISOString(),
+        actor: entry.actor,
+        action: entry.action,
+        leadId: entry.leadId ?? null,
+        leadLabel: entry.leadLabel ?? null,
+        detail: entry.detail ?? null,
+      });
+      db.activity.length = Math.min(db.activity.length, MAX_ACTIVITY_ENTRIES);
+    });
+  },
+
+  async activity(opts = {}) {
+    return (await load()).activity
+      .filter((a) => !opts.leadId || a.leadId === opts.leadId)
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, activityLimit(opts.limit));
+  },
+
+  async findAdminByEmail(email) {
+    const e = email.trim().toLowerCase();
+    return (await load()).admins.find((a) => a.email === e) ?? null;
+  },
+
+  async getAdmin(id) {
+    return (await load()).admins.find((a) => a.id === id) ?? null;
+  },
+
+  async listAdmins() {
+    return (await load()).admins.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  },
+
+  createAdmin({ email, name, passwordHash }) {
+    return mutate((db) => {
+      const e = email.trim().toLowerCase();
+      if (db.admins.some((a) => a.email === e)) throw new Error("duplicate_email");
+      const admin: AdminAccount = {
+        id: randomUUID(),
+        email: e,
+        name,
+        passwordHash,
+        disabled: false,
+        createdAt: new Date().toISOString(),
+        lastLoginAt: null,
+      };
+      db.admins.push(admin);
+      return admin;
+    });
+  },
+
+  async updateAdmin(id, patch) {
+    await mutate((db) => {
+      const admin = db.admins.find((a) => a.id === id);
+      if (!admin) return;
+      if (patch.name !== undefined) admin.name = patch.name;
+      if (patch.passwordHash !== undefined) admin.passwordHash = patch.passwordHash;
+      if (patch.disabled !== undefined) admin.disabled = patch.disabled;
+    });
+  },
+
+  async touchAdminLogin(id) {
+    await mutate((db) => {
+      const admin = db.admins.find((a) => a.id === id);
+      if (admin) admin.lastLoginAt = new Date().toISOString();
+    });
+  },
+
+  async countActiveAdmins() {
+    return (await load()).admins.filter((a) => !a.disabled).length;
+  },
+
+  async recordLoginFailure(key) {
+    await mutate((db) => {
+      const cutoff = new Date(Date.now() - DAY_MS).toISOString();
+      db.loginFailures = db.loginFailures.filter((f) => f.at >= cutoff);
+      db.loginFailures.push({ key, at: new Date().toISOString() });
+    });
+  },
+
+  async countLoginFailures(key, since) {
+    const t = since.toISOString();
+    return (await load()).loginFailures.filter((f) => f.key === key && f.at >= t).length;
+  },
+
+  async clearLoginFailures(key) {
+    // Skip the write when there's nothing to clear (the common case: every successful sign-in).
+    if (!(await load()).loginFailures.some((f) => f.key === key)) return;
+    await mutate((db) => {
+      db.loginFailures = db.loginFailures.filter((f) => f.key !== key);
+    });
+  },
 };

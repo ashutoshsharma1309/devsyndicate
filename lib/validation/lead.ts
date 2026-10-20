@@ -26,6 +26,15 @@ export const allEventTypes = [
   { value: "unsure", label: "Not sure yet" },
 ] as const;
 
+/** Who the enquiry comes from. Required: it decides who follows up and how. */
+export const orgTypes = [
+  { value: "college", label: "College or university" },
+  { value: "company", label: "Company" },
+  { value: "other", label: "Other organisation" },
+] as const;
+
+export type OrgType = (typeof orgTypes)[number]["value"];
+
 export const participantRanges = [
   { value: "lt100", label: "Under 100" },
   { value: "100-300", label: "100 – 300" },
@@ -118,7 +127,7 @@ const optionalChoice = <T extends readonly [string, ...string[]]>(vals: T, messa
 
 const phoneDigits = (v: string) => v.replace(/\D/g, "");
 
-// Required: name, institution, email, phone and enquiry type. Everything else is
+// Required: name, institution, organisation type, email, phone and enquiry type. Everything else is
 // optional so the form stays short. City, state, website and theme are kept
 // (optional) for API compatibility and for leads stored by earlier versions.
 export const leadSchema = z.object({
@@ -134,6 +143,7 @@ export const leadSchema = z.object({
     }),
   ),
   eventType: z.enum(values(allEventTypes), "Choose what your enquiry is about."),
+  orgType: z.enum(values(orgTypes), "Tell us whether you're contacting us from a college, a company or another organisation."),
 
   designation: optionalText(120),
   city: optionalText(80),

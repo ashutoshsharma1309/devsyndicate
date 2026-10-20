@@ -43,7 +43,7 @@ lib/
 proxy.ts             optimistic /admin gate (pages and actions re-check)
 db/schema.sql        lead + notes tables
 tests/, scripts/smoke.mjs, .github/workflows/ci.yml   unit tests, smoke test, CI
-vercel.json          runs server functions in Mumbai (bom1), near visitors and the database
+vercel.json          runs server functions in Washington (iad1), next to the Neon database (us-east-1)
 ```
 
 ## How a request flows

@@ -1,5 +1,7 @@
 // Generates an ADMIN_PASSWORD_HASH value.
 // Usage: npm run admin:hash -- "your long admin password"
+// Same format and parameters as hashPassword() in lib/auth/password.ts (16-byte salt, 64-byte key,
+// default scrypt cost), so a hash made here verifies there and vice versa. Change both together.
 import { randomBytes, scryptSync } from "node:crypto";
 
 const password = process.argv[2];

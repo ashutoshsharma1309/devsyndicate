@@ -30,7 +30,8 @@ export default function PrivacyPage() {
               <p>
                 <strong>Information you give us.</strong> When you submit the enquiry form, we collect the details
                 you enter: your name, work or institutional email address and phone number; your institution&apos;s
-                name; the type of enquiry; and anything optional you choose to add (your designation, city, expected
+                name; the type of organisation you represent (college, company or other); the type of enquiry; and
+                anything optional you choose to add (your designation, city, expected
                 participants, preferred format, timeline and additional requirements).
               </p>
               <p>

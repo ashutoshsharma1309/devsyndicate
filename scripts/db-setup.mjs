@@ -9,10 +9,15 @@ if (!url) {
   process.exit(1);
 }
 
-const sql = postgres(url, { ssl: process.env.DATABASE_SSL === "disable" ? false : "require", max: 1 });
+const sql = postgres(url, {
+  ssl: process.env.DATABASE_SSL === "disable" ? false : "require",
+  max: 1,
+  // Re-runs report "already exists, skipping" for every object; that's expected, not worth printing.
+  onnotice: () => {},
+});
 try {
   await sql.unsafe(await readFile(new URL("../db/schema.sql", import.meta.url), "utf8"));
-  console.log("✓ Lead tables are ready.");
+  console.log("✓ Lead, admin and activity tables are ready.");
 } catch (err) {
   console.error("✗ Failed to apply schema:", err.message);
   process.exitCode = 1;

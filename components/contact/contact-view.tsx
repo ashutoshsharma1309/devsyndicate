@@ -27,7 +27,7 @@ export function ContactView({ outcome, children }: { outcome?: Outcome; children
       <PageHero
         eyebrow="Contact"
         title="Let's plan your college hackathon."
-        lead="Tell us about your institution and what you have in mind. The Dev Syndicate team can discuss your requirements and the right format for your event."
+        lead="Tell us about your college, company or organisation and what you have in mind. The Dev Syndicate team can discuss your requirements and the right format for your event."
         below={<ContactOptions tone="dark" formHref="#enquiry" />}
       />
 

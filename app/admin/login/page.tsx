@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { connection } from "next/server";
 import { LoginForm } from "@/components/admin/forms";
-import { adminConfigured } from "@/lib/auth/admin";
+import { loginMode, ownerLoginAllowed } from "@/lib/auth/admin";
 import { safeAdminPath } from "@/lib/auth/session";
 
 export const metadata = { title: "Sign in" };
@@ -9,7 +9,8 @@ export const metadata = { title: "Sign in" };
 export default async function AdminLoginPage({ searchParams }: PageProps<"/admin/login">) {
   // Read env at request time, not build time.
   await connection();
-  const configured = adminConfigured();
+  const mode = await loginMode();
+  const configured = mode !== "unconfigured";
   // Set by proxy.ts when a signed-out visit to an admin page was redirected here.
   const { next } = await searchParams;
   const nextPath = safeAdminPath(Array.isArray(next) ? next[0] : next) ?? undefined;
@@ -24,6 +25,11 @@ export default async function AdminLoginPage({ searchParams }: PageProps<"/admin
         </div>
         <h1 className="mt-10 text-3xl font-medium tracking-[-0.035em]">Lead dashboard</h1>
         <p className="mt-2 text-sm text-mute">Team access only.</p>
+        {mode === "owner" && (
+          <p className="mt-4 text-sm text-mute">
+            No named admin accounts yet — sign in with the shared password, then add accounts under Team.
+          </p>
+        )}
         {!configured && (
           <p role="alert" className="mt-6 rounded-sm border border-danger/30 bg-danger/5 p-4 text-sm text-danger">
             Admin access isn&apos;t configured. Set <code className="font-mono">SESSION_SECRET</code> and{" "}
@@ -31,7 +37,12 @@ export default async function AdminLoginPage({ searchParams }: PageProps<"/admin
           </p>
         )}
         <div className="mt-8 rounded-md border border-line bg-white p-6">
-          <LoginForm disabled={!configured} next={nextPath} />
+          <LoginForm
+            disabled={!configured}
+            next={nextPath}
+            mode={mode === "named" ? "named" : "owner"}
+            allowOwner={mode === "named" && ownerLoginAllowed(mode)}
+          />
         </div>
       </div>
     </main>

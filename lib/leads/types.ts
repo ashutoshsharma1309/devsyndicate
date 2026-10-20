@@ -1,4 +1,4 @@
-import type { LeadData } from "@/lib/validation/lead";
+import { eventTypes, orgTypes, type LeadData, type OrgType } from "@/lib/validation/lead";
 
 export const leadStatuses = [
   { value: "new", label: "New" },
@@ -17,7 +17,9 @@ export const isLeadStatus = (v: unknown): v is LeadStatus => leadStatuses.some((
 /** Outcome of the team notification email for a stored lead. */
 export type NotifyStatus = "sent" | "failed";
 
-export type Lead = LeadData & {
+export type Lead = Omit<LeadData, "orgType"> & {
+  /** "" for leads stored before the form asked for it. */
+  orgType: OrgType | "";
   id: string;
   status: LeadStatus;
   createdAt: string;
@@ -46,6 +48,85 @@ export type LeadFilters = {
   q?: string;
   status?: LeadStatus;
   eventType?: string;
+  /** "unknown" matches leads stored before the field existed. */
+  orgType?: OrgType | "unknown";
+  /** YYYY-MM-DD, inclusive, as a day in Asia/Kolkata. */
+  from?: string;
+  /** YYYY-MM-DD, inclusive, as a day in Asia/Kolkata. */
+  to?: string;
+  /** 1-based; default 1. */
+  page?: number;
+  /** Default 50, max 200. */
+  pageSize?: number;
+};
+
+export type LeadPage = { leads: Lead[]; total: number; page: number; pageSize: number };
+
+export type LeadStats = {
+  total: number;
+  last30Days: number;
+  byStatus: Record<LeadStatus, number>;
+  byOrgType: Record<OrgType | "unknown", number>;
+  byEventType: Record<string, number>;
+  /** The last 12 calendar months in Asia/Kolkata, oldest first, zero-filled. */
+  byMonth: { month: string; count: number }[];
+  won: number;
+  lost: number;
+  notifyFailed: number;
+};
+
+/** Leads grouped by institution, so repeat enquiries from one place read as one relationship. */
+export type Organisation = {
+  /** Normalised institution: lowercase, trimmed, whitespace collapsed, punctuation stripped. */
+  key: string;
+  /** The most recent spelling. */
+  name: string;
+  /** The most recent non-empty value. */
+  orgType: OrgType | "";
+  leadCount: number;
+  firstAt: string;
+  lastAt: string;
+  latestStatus: LeadStatus;
+  statuses: Partial<Record<LeadStatus, number>>;
+  /** Distinct, non-empty, most recent first. */
+  cities: string[];
+};
+
+export type ActivityAction =
+  | "login"
+  | "login_failed"
+  | "logout"
+  | "status_changed"
+  | "note_added"
+  | "contact_updated"
+  | "lead_deleted"
+  | "export"
+  | "admin_created"
+  | "admin_updated"
+  | "password_changed";
+
+export type NewActivity = {
+  /** Display form, e.g. "Asha Rao <asha@x.in>" or "Owner (shared password)". */
+  actor: string;
+  action: ActivityAction;
+  leadId?: string | null;
+  /** Institution name, kept so the entry still reads after the lead is deleted. */
+  leadLabel?: string | null;
+  /** Never personal data: e.g. "new → contacted", "fields: phone, email", "23 rows". */
+  detail?: string | null;
+};
+
+export type ActivityEntry = NewActivity & { id: string; at: string };
+
+export type AdminAccount = {
+  id: string;
+  /** Always lowercase. */
+  email: string;
+  name: string;
+  passwordHash: string;
+  disabled: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
 };
 
 export type NewLead = LeadData & {
@@ -57,11 +138,16 @@ export type NewLead = LeadData & {
 export interface LeadStore {
   readonly kind: "postgres" | "file";
   create(lead: NewLead): Promise<Lead>;
-  list(filters?: LeadFilters): Promise<Lead[]>;
+  list(filters?: LeadFilters): Promise<LeadPage>;
+  /** Every match, newest first (hard cap 10,000) — for exports and summaries. */
+  listAll(filters?: Omit<LeadFilters, "page" | "pageSize">): Promise<Lead[]>;
   get(id: string): Promise<{ lead: Lead; notes: LeadNote[] } | null>;
   updateStatus(id: string, status: LeadStatus): Promise<void>;
   addNote(leadId: string, body: string): Promise<void>;
   countByStatus(): Promise<Record<LeadStatus, number>>;
+  stats(): Promise<LeadStats>;
+  /** Sorted by lastAt, newest first. */
+  organisations(filters?: { q?: string; orgType?: OrgType | "unknown" }): Promise<Organisation[]>;
   /** Submissions from the same IP hash since `since`. */
   countRecent(ipHash: string, since: Date): Promise<number>;
   /** Records whether the notification email for this lead was sent. Doesn't touch updatedAt. */
@@ -72,4 +158,153 @@ export interface LeadStore {
   updateContact(id: string, fields: ContactFields): Promise<void>;
   /** Cheap connectivity check. Throws if the store can't be reached. */
   ping(): Promise<void>;
+
+  logActivity(entry: NewActivity): Promise<void>;
+  /** Newest first. limit: default 100, max 500. */
+  activity(opts?: { leadId?: string; limit?: number }): Promise<ActivityEntry[]>;
+
+  findAdminByEmail(email: string): Promise<AdminAccount | null>;
+  getAdmin(id: string): Promise<AdminAccount | null>;
+  listAdmins(): Promise<AdminAccount[]>;
+  /** Throws Error("duplicate_email") if the address is taken. */
+  createAdmin(input: { email: string; name: string; passwordHash: string }): Promise<AdminAccount>;
+  updateAdmin(id: string, patch: { name?: string; passwordHash?: string; disabled?: boolean }): Promise<void>;
+  touchAdminLogin(id: string): Promise<void>;
+  countActiveAdmins(): Promise<number>;
+
+  /** Also prunes entries older than a day. */
+  recordLoginFailure(key: string): Promise<void>;
+  countLoginFailures(key: string, since: Date): Promise<number>;
+  clearLoginFailures(key: string): Promise<void>;
+}
+
+// ── Shared by both stores, so file and Postgres behave identically ──────────
+
+export const DEFAULT_PAGE_SIZE = 50;
+export const MAX_PAGE_SIZE = 200;
+export const MAX_LIST_ALL = 10_000;
+export const DEFAULT_ACTIVITY_LIMIT = 100;
+export const MAX_ACTIVITY_LIMIT = 500;
+
+export function pageOf(f: Pick<LeadFilters, "page" | "pageSize">) {
+  const int = (v: unknown, fallback: number) => (Number.isFinite(v) ? Math.floor(v as number) : fallback);
+  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, int(f.pageSize, DEFAULT_PAGE_SIZE)));
+  const page = Math.max(1, int(f.page, 1));
+  return { page, pageSize, offset: (page - 1) * pageSize };
+}
+
+export const activityLimit = (limit?: number) =>
+  Math.min(MAX_ACTIVITY_LIMIT, Math.max(1, Number.isFinite(limit) ? Math.floor(limit!) : DEFAULT_ACTIVITY_LIMIT));
+
+// India has no daylight saving, so a fixed +05:30 offset is exact for every date.
+const IST_OFFSET_MS = 330 * 60_000;
+
+/** Start of a YYYY-MM-DD day in Asia/Kolkata as an instant, or null if the date isn't real. */
+function istDayStart(day: string | undefined) {
+  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const d = new Date(`${day}T00:00:00+05:30`);
+  // Rejects 2026-02-31 and similar, which Date would roll over.
+  return Number.isNaN(d.getTime()) || new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10) !== day
+    ? null
+    : d;
+}
+
+/** The from/to filters as a half-open [start, end) range of instants. Invalid dates are ignored. */
+export function dateRange(f: Pick<LeadFilters, "from" | "to">) {
+  const start = istDayStart(f.from);
+  const toStart = istDayStart(f.to);
+  return { start, end: toStart ? new Date(toStart.getTime() + 24 * 60 * 60_000) : null };
+}
+
+/** "YYYY-MM" of an instant in Asia/Kolkata. */
+export const istMonth = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 7);
+
+/** The last 12 calendar months in Asia/Kolkata, oldest first. */
+export function last12Months(now = new Date()) {
+  const ist = new Date(now.getTime() + IST_OFFSET_MS);
+  const y = ist.getUTCFullYear();
+  const m = ist.getUTCMonth();
+  return Array.from({ length: 12 }, (_, i) => new Date(Date.UTC(y, m - 11 + i, 1)).toISOString().slice(0, 7));
+}
+
+/** Escapes LIKE wildcards so a search for "100%" matches literally. */
+export const likePattern = (q: string) => `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+/** Fields the lead search looks in. */
+export const searchFields = ["institution", "name", "email", "city", "state", "phone"] as const;
+
+/** Grouping key for an institution: "I.I.T.  Delhi " and "iit delhi" are the same place. */
+export function organisationKey(institution: string) {
+  const key = institution
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  // A name that is only punctuation would otherwise group with every other such name.
+  return key || institution.trim().toLowerCase();
+}
+
+export const zeroByStatus = () => Object.fromEntries(leadStatuses.map((s) => [s.value, 0])) as Record<LeadStatus, number>;
+export const zeroByOrgType = () =>
+  Object.fromEntries([...orgTypes.map((o) => [o.value, 0]), ["unknown", 0]]) as Record<OrgType | "unknown", number>;
+/** Current enquiry types start at zero; older types appear only when stored leads use them. */
+export const zeroByEventType = (): Record<string, number> => Object.fromEntries(eventTypes.map((t) => [t.value, 0]));
+
+type OrgRow = Pick<Lead, "institution" | "orgType" | "status" | "city" | "createdAt">;
+
+/**
+ * Groups leads (newest first) into organisations, then applies the filters to
+ * the groups, so a search never splits one organisation's history.
+ */
+export function groupOrganisations(rows: OrgRow[], f: { q?: string; orgType?: OrgType | "unknown" } = {}): Organisation[] {
+  const byKey = new Map<string, Organisation>();
+  const seenCities = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const key = organisationKey(r.institution);
+    let org = byKey.get(key);
+    if (!org) {
+      org = {
+        key,
+        name: r.institution,
+        orgType: "",
+        leadCount: 0,
+        firstAt: r.createdAt,
+        lastAt: r.createdAt,
+        latestStatus: r.status,
+        statuses: {},
+        cities: [],
+      };
+      byKey.set(key, org);
+      seenCities.set(key, new Set());
+    }
+    org.leadCount++;
+    if (!org.orgType && r.orgType) org.orgType = r.orgType;
+    if (r.createdAt < org.firstAt) org.firstAt = r.createdAt;
+    if (r.createdAt > org.lastAt) {
+      // Only if the rows weren't newest-first after all.
+      org.lastAt = r.createdAt;
+      org.name = r.institution;
+      org.latestStatus = r.status;
+    }
+    org.statuses[r.status] = (org.statuses[r.status] ?? 0) + 1;
+    const city = r.city?.trim();
+    const seen = seenCities.get(key)!;
+    if (city && !seen.has(city.toLowerCase())) {
+      seen.add(city.toLowerCase());
+      org.cities.push(city);
+    }
+  }
+
+  const q = f.q?.trim().toLowerCase();
+  const qKey = q ? organisationKey(q) : "";
+  return [...byKey.values()]
+    .filter((o) => !f.orgType || (f.orgType === "unknown" ? o.orgType === "" : o.orgType === f.orgType))
+    .filter(
+      (o) =>
+        !q ||
+        o.name.toLowerCase().includes(q) ||
+        (qKey && o.key.includes(qKey)) ||
+        o.cities.some((c) => c.toLowerCase().includes(q)),
+    )
+    .sort((a, b) => b.lastAt.localeCompare(a.lastAt));
 }

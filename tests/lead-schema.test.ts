@@ -7,7 +7,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 // Node needs the real file extension; tsconfig doesn't enable allowImportingTsExtensions.
 // @ts-expect-error -- TS5097: types still resolve, only the extension is flagged.
-import { allEventTypes, fieldErrors, labelFor, leadSchema, participantRanges } from "../lib/validation/lead.ts";
+import { allEventTypes, fieldErrors, labelFor, leadSchema, orgTypes, participantRanges } from "../lib/validation/lead.ts";
 
 const valid = {
   name: "Asha Rao",
@@ -15,6 +15,7 @@ const valid = {
   email: "Asha.Rao@Example.edu.in ",
   phone: "+91 98765 43210",
   eventType: "campus",
+  orgType: "college",
 };
 
 /** Field → first error message, or {} when the input is valid. */
@@ -33,7 +34,7 @@ describe("leadSchema", () => {
     }
   });
 
-  for (const field of ["name", "institution", "email", "phone", "eventType"] as const) {
+  for (const field of ["name", "institution", "email", "phone", "eventType", "orgType"] as const) {
     test(`reports a missing ${field} on that field`, () => {
       const input: Record<string, unknown> = { ...valid };
       delete input[field];
@@ -78,6 +79,26 @@ describe("leadSchema", () => {
 
   test("rejects an unknown enquiry type", () => {
     assert.ok(errorsFor({ ...valid, eventType: "party" }).eventType);
+  });
+
+  test("accepts every organisation type", () => {
+    for (const { value } of orgTypes) {
+      assert.deepEqual(errorsFor({ ...valid, orgType: value }), {}, value);
+    }
+  });
+
+  test("rejects an unknown or blank organisation type with the organisation message", () => {
+    for (const orgType of ["school", "", "College", null, 3]) {
+      const errors = errorsFor({ ...valid, orgType });
+      assert.deepEqual(Object.keys(errors), ["orgType"], String(orgType));
+      assert.match(errors.orgType ?? "", /college, a company or another organisation/);
+    }
+  });
+
+  test("reports a missing organisation type with the organisation message", () => {
+    const input: Record<string, unknown> = { ...valid };
+    delete input.orgType;
+    assert.match(errorsFor(input).orgType ?? "", /college, a company or another organisation/);
   });
 
   test("accepts enquiry types from earlier versions of the form", () => {

@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { safeAdminPath, SESSION_COOKIE, verifySessionToken } from "@/lib/auth/session";
+import { safeAdminPath, SESSION_COOKIE, SESSION_ENDED_PARAM, verifySessionToken } from "@/lib/auth/session";
 
 /**
  * Optimistic gate for /admin. Every admin page and action also calls
@@ -7,6 +7,16 @@ import { safeAdminPath, SESSION_COOKIE, verifySessionToken } from "@/lib/auth/se
  */
 export async function proxy(req: NextRequest) {
   const { pathname, search, searchParams } = req.nextUrl;
+
+  if (pathname === "/admin/login" && searchParams.has(SESSION_ENDED_PARAM) && req.method === "GET") {
+    // requireAdmin() sends a disabled or removed account here. Its token is still
+    // signed, so clear it instead of bouncing back into the panel. GET only: the
+    // sign-in action posts to this same URL and sets a fresh cookie.
+    const res = withNoIndex(NextResponse.next());
+    res.cookies.delete({ name: SESSION_COOKIE, path: "/admin" });
+    return res;
+  }
+
   const authed = await verifySessionToken(req.cookies.get(SESSION_COOKIE)?.value);
 
   if (pathname === "/admin/login") {

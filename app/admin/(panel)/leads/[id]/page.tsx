@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ContactForm, DeleteLeadForm, NoteForm, StatusForm } from "@/components/admin/forms";
-import { NotifyFailedBadge, StatusBadge } from "@/components/admin/status-badge";
+import { ActivityList, ContactForm, DeleteLeadForm, NoteForm, StatusForm } from "@/components/admin/forms";
+import { NotifyFailedBadge, OrgTypeBadge, StatusBadge } from "@/components/admin/status-badge";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getLeadStore } from "@/lib/leads/store";
 import { formatDate, formatLocation } from "@/lib/utils";
-import { allEventTypes, eventFormats, labelFor, participantRanges, timelines } from "@/lib/validation/lead";
+import { allEventTypes, eventFormats, labelFor, orgTypes, participantRanges, timelines } from "@/lib/validation/lead";
 
 export const metadata = { title: "Lead" };
 
@@ -29,7 +29,9 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
   await requireAdmin();
   const { id } = await params;
   const store = await getLeadStore();
-  const result = store ? await store.get(id) : null;
+  const [result, history] = store
+    ? await Promise.all([store.get(id), store.activity({ leadId: id })])
+    : [null, []];
   if (!result) notFound();
   const { lead, notes } = result;
 
@@ -49,6 +51,7 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           {lead.notifyStatus === "failed" && <NotifyFailedBadge className="text-sm" />}
+          <OrgTypeBadge orgType={lead.orgType} className="text-sm" />
           <StatusBadge status={lead.status} className="text-sm" />
         </div>
       </div>
@@ -109,6 +112,16 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
             title="Institution"
             rows={[
               ["Institution", lead.institution],
+              [
+                "Organisation type",
+                lead.orgType ? (
+                  labelFor(orgTypes, lead.orgType)
+                ) : (
+                  <span key="o" className="text-mute">
+                    Not recorded (received before the form asked)
+                  </span>
+                ),
+              ],
               ["Location", formatLocation(lead)],
               [
                 "Website",
@@ -156,6 +169,17 @@ export default async function LeadPage({ params }: PageProps<"/admin/leads/[id]"
                   </li>
                 ))}
               </ol>
+            )}
+          </section>
+
+          <section className="rounded-md border border-line bg-white p-5">
+            <h2 className="text-sm font-medium">History</h2>
+            {history.length === 0 ? (
+              <p className="mt-1.5 text-sm text-mute">No admin activity on this lead yet.</p>
+            ) : (
+              <div className="mt-2">
+                <ActivityList entries={history} onLeadPage />
+              </div>
             )}
           </section>
 

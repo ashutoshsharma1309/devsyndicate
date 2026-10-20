@@ -15,6 +15,7 @@ import {
   fieldErrors,
   labelFor,
   leadSchema,
+  orgTypes,
   participantRanges,
   spamFields,
   timelines,
@@ -28,6 +29,8 @@ type Status = "idle" | "submitting" | "success" | "error";
 type Notice = "invalid" | "error";
 
 const empty: Values = {
+  // First on the form, so first in focus order too.
+  orgType: "",
   name: "",
   designation: "",
   institution: "",
@@ -68,6 +71,19 @@ function validate(values: Values): Errors {
   return r.success ? {} : fieldErrors(r.error.issues);
 }
 
+/** The organisation-name field follows "You're contacting us from"; nothing chosen reads as the general case. */
+const institutionCopy: Record<string, { label: string; short: string; placeholder: string; missing: string }> = {
+  college: {
+    label: "College or university",
+    short: "College",
+    placeholder: "e.g. National Institute of Technology",
+    missing: "Enter your college or university name.",
+  },
+  company: { label: "Company name", short: "Company", placeholder: "e.g. Acme Technologies", missing: "Enter your company name." },
+  other: { label: "Organisation name", short: "Organisation", placeholder: "", missing: "Enter your organisation's name." },
+};
+const copyFor = (orgType: string) => institutionCopy[orgType] ?? institutionCopy.other;
+
 /** Formats shown on the site that map to the general enquiry type, with a starter note. */
 const formatNotes: Record<string, string> = {
   innovation: "We're interested in an Innovation Challenge.",
@@ -78,6 +94,8 @@ const formatNotes: Record<string, string> = {
 export function LeadFormWithPreset() {
   const params = useSearchParams();
   const key = params.get("type") ?? params.get("format") ?? "";
+  // Sponsors are companies, so that link can answer "who are you" too.
+  if (key === "sponsorship") return <LeadForm preset={{ eventType: key, orgType: "company" }} />;
   if (eventTypes.some((t) => t.value === key)) return <LeadForm preset={{ eventType: key }} />;
   if (formatNotes[key]) return <LeadForm preset={{ eventType: "general", message: formatNotes[key] }} />;
   return <LeadForm />;
@@ -183,13 +201,17 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
   }
 
   const contact = site.primaryContact;
+  const institution = copyFor(values.orgType);
+  // The schema's "required" message names colleges; match it to the organisation chosen.
+  const institutionError =
+    errors.institution && values.institution.trim().length < 2 ? institution.missing : errors.institution;
 
   if (status === "success") {
     return (
       <Received
         ref={resultRef}
         details={[
-          ["Institution", values.institution],
+          [institution.short, values.institution],
           ["Enquiry", labelFor(eventTypes, values.eventType)],
           ["We'll reply to", values.email],
         ]}
@@ -255,6 +277,18 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
       </div>
 
       <Group n="01" title="About you">
+        <div className="sm:col-span-2">
+          <ChoiceGroup
+            name="orgType"
+            legend="You're contacting us from"
+            required
+            options={orgTypes}
+            value={values.orgType}
+            onChange={(v) => set("orgType", v)}
+            error={errors.orgType}
+            columns="grid-cols-1 sm:grid-cols-3"
+          />
+        </div>
         <Field id={fieldId("name")} label="Full name" required error={errors.name}>
           <Input {...control("name")} required autoComplete="name" maxLength={120} />
         </Field>
@@ -266,12 +300,12 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
             maxLength={120}
           />
         </Field>
-        <Field id={fieldId("institution")} label="College or institution" required error={errors.institution}>
+        <Field id={fieldId("institution")} label={institution.label} required error={institutionError}>
           <Input
             {...control("institution")}
             required
             autoComplete="organization"
-            placeholder="e.g. National Institute of Technology"
+            placeholder={institution.placeholder || undefined}
             maxLength={160}
           />
         </Field>
