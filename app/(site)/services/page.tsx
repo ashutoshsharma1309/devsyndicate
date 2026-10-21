@@ -4,24 +4,19 @@ import { FinalCta } from "@/components/sections/final-cta";
 import { FormatsSection } from "@/components/sections/formats";
 import { ButtonLink } from "@/components/ui/button";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
-import { lifecycle, partnerOptions, phaseIntros, type Phase } from "@/lib/content";
-import { jsonLd, pageMetadata, type PageSeo } from "@/lib/seo";
+import type { Metadata } from "next";
+import { getServices, PHASES, type LifecycleStage } from "@/lib/cms";
+import { cmsPageSeo, jsonLd, pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
-const page: PageSeo = {
-  title: "Hackathon Management Services for Colleges",
-  breadcrumb: "Services",
-  description:
-    "End-to-end hackathon management for colleges: strategy, branding, outreach, registrations, mentors and judges, evaluation, execution and post-event reporting.",
-  path: "/services",
-};
+const seo = () => cmsPageSeo("/services", { breadcrumb: "Services" });
 
-export const metadata = pageMetadata(page);
+export async function generateMetadata(): Promise<Metadata> {
+  return pageMetadata(await seo());
+}
 
-const phases: Phase[] = ["Plan", "Build-up", "Live", "After"];
-
-function servicesJsonLd() {
+function servicesJsonLd(lifecycle: readonly LifecycleStage[]) {
   return {
     "@context": "https://schema.org",
     "@type": "Service",
@@ -40,22 +35,22 @@ function servicesJsonLd() {
   };
 }
 
-export default function ServicesPage() {
+export default async function ServicesPage() {
+  const [page, content] = await Promise.all([seo(), getServices()]);
+  const { hero, stagesIntro, phaseIntros, stages: lifecycle, partners } = content;
+  // A phase whose stages are all hidden is left out.
+  const phases = PHASES.filter((phase) => lifecycle.some((s) => s.phase === phase));
   return (
     <>
       <PageJsonLd page={page} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(servicesJsonLd())} />
-      <PageHero
-        eyebrow="Services"
-        title="Everything a hackathon needs. One team accountable for it."
-        lead="Eight stages from first idea to final report. Take the whole thing, or tell us which parts your college already has covered."
-      >
+      <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(servicesJsonLd(lifecycle))} />
+      <PageHero eyebrow={hero.eyebrow} title={hero.title} lead={hero.lead}>
         <div className="flex flex-col gap-3 sm:flex-row">
-          <ButtonLink href="/contact" size="lg" arrow>
-            Conduct a Hackathon
+          <ButtonLink href={hero.primaryCta.href} size="lg" arrow>
+            {hero.primaryCta.label}
           </ButtonLink>
-          <ButtonLink href="/how-it-works" size="lg" variant="secondary-dark">
-            See How It Works
+          <ButtonLink href={hero.secondaryCta.href} size="lg" variant="secondary-dark">
+            {hero.secondaryCta.label}
           </ButtonLink>
         </div>
       </PageHero>
@@ -64,15 +59,12 @@ export default function ServicesPage() {
         <Container>
           <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
             <div className="lg:col-span-7">
-              <SectionLabel>What we handle</SectionLabel>
+              <SectionLabel>{stagesIntro.label}</SectionLabel>
               <SectionHeading id="stages-title" className="mt-6">
-                The full lifecycle, stage by stage.
+                {stagesIntro.heading}
               </SectionHeading>
             </div>
-            <p className="t-lead text-mute lg:col-span-5">
-              Each stage comes with defined deliverables, so you can see exactly what you&apos;re getting before the
-              event begins.
-            </p>
+            <p className="t-lead text-mute lg:col-span-5">{stagesIntro.description}</p>
           </div>
 
           <div className="mt-14 space-y-16 md:mt-20 md:space-y-20">
@@ -92,7 +84,7 @@ export default function ServicesPage() {
                   >
                     {stages.map((s, i) => (
                       <li
-                        key={s.n}
+                        key={`${i}-${s.n}`}
                         data-reveal
                         style={{ ["--reveal-i" as string]: i }}
                         className={cn(
@@ -112,8 +104,8 @@ export default function ServicesPage() {
                           )}
                           aria-label={`${s.title} deliverables`}
                         >
-                          {s.deliverables.map((d) => (
-                            <li key={d} className="flex items-center gap-2.5 text-[0.9375rem]">
+                          {s.deliverables.map((d, j) => (
+                            <li key={`${j}-${d}`} className="flex items-center gap-2.5 text-[0.9375rem]">
                               <span aria-hidden="true" className="size-1 shrink-0 bg-signal" />
                               {d}
                             </li>
@@ -135,26 +127,18 @@ export default function ServicesPage() {
         <Container>
           <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
             <div className="lg:col-span-5">
-              <SectionLabel tone="dark">For companies</SectionLabel>
+              <SectionLabel tone="dark">{partners.label}</SectionLabel>
               <SectionHeading id="partners-title" className="mt-6">
-                Put your team in front of students who build.
+                {partners.heading}
               </SectionHeading>
-              <p className="t-lead mt-6 text-white/70">
-                Technology companies, startups and professionals can take part in the hackathons we run. Tell us how
-                you&apos;d like to be involved.
-              </p>
-              <ButtonLink
-                href="/contact?type=sponsorship#enquiry"
-                size="lg"
-                arrow
-                className="mt-10"
-              >
-                Partner With Us
+              <p className="t-lead mt-6 text-white/70">{partners.description}</p>
+              <ButtonLink href={partners.cta.href} size="lg" arrow className="mt-10">
+                {partners.cta.label}
               </ButtonLink>
             </div>
             <ul className="grid gap-px self-start overflow-hidden rounded-md border border-white/[0.08] bg-white/[0.08] sm:grid-cols-2 lg:col-span-7">
-              {partnerOptions.map((p, i) => (
-                <li key={p.title} data-reveal style={{ ["--reveal-i" as string]: i }} className="bg-ink p-6 md:p-8">
+              {partners.options.map((p, i) => (
+                <li key={`${i}-${p.title}`} data-reveal style={{ ["--reveal-i" as string]: i }} className="bg-ink p-6 md:p-8">
                   <p className="font-mono text-sm text-signal-soft">{String(i + 1).padStart(2, "0")}</p>
                   <h3 className="mt-5 text-[1.1875rem] font-medium tracking-[-0.02em]">{p.title}</h3>
                   <p className="mt-2 text-[0.9375rem] leading-relaxed text-white/60">{p.body}</p>

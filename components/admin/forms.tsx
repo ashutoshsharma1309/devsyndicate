@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
 import { useActionState, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   addLeadNote,
   deleteLead,
-  login,
   updateLeadContact,
   updateLeadStatus,
   type ActionState,
@@ -17,67 +15,6 @@ import { describedBy, Field, Input, Select, Textarea } from "@/components/ui/fie
 import { Toast } from "@/components/ui/toast";
 import { leadStatuses, type ActivityEntry, type ContactFields, type LeadStatus } from "@/lib/leads/types";
 import { cn, formatDate } from "@/lib/utils";
-
-/**
- * `next` is where to go after signing in; the action re-validates it.
- * "named": email + password. "owner" (bootstrap): the shared password only.
- * `allowOwner` (break-glass) lets the email be left empty for the shared password.
- */
-export function LoginForm({
-  disabled,
-  next,
-  mode,
-  allowOwner = false,
-}: {
-  disabled: boolean;
-  next?: string;
-  mode: "named" | "owner";
-  allowOwner?: boolean;
-}) {
-  const [state, action, pending] = useActionState(login, {} as ActionState);
-  const named = mode === "named";
-  return (
-    <form action={action} className="space-y-5">
-      {next && <input type="hidden" name="next" value={next} />}
-      {named && (
-        <Field
-          id="email"
-          label="Email"
-          required={!allowOwner}
-          hint={allowOwner ? "Leave empty to use the shared password." : undefined}
-        >
-          <Input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="username"
-            required={!allowOwner}
-            autoFocus
-            disabled={disabled}
-            aria-invalid={state.error ? true : undefined}
-            aria-describedby={allowOwner ? "email-hint" : undefined}
-          />
-        </Field>
-      )}
-      <Field id="password" label="Password" required error={state.error}>
-        <Input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          autoFocus={!named}
-          disabled={disabled}
-          aria-invalid={state.error ? true : undefined}
-          aria-describedby={state.error ? "password-error" : undefined}
-        />
-      </Field>
-      <Button type="submit" size="lg" className="w-full" disabled={pending || disabled}>
-        {pending ? "Signing in…" : "Sign in"}
-      </Button>
-    </form>
-  );
-}
 
 export function StatusForm({ id, status }: { id: string; status: LeadStatus }) {
   const [state, action, pending] = useActionState(updateLeadStatus, {} as ActionState);
@@ -282,54 +219,23 @@ export function FlashToast({ message, param }: { message: string; param: string 
   return <Toast message={message} stamp={stamp} />;
 }
 
-const navItems = [
-  { href: "/admin", label: "Overview" },
-  { href: "/admin/leads", label: "Leads" },
-  { href: "/admin/organisations", label: "Organisations" },
-  { href: "/admin/activity", label: "Activity" },
-  { href: "/admin/team", label: "Team" },
-  { href: "/admin/account", label: "Account" },
-] as const;
-
-/** Panel navigation. Client-side only to mark the current section (layouts can't read the path). */
-export function AdminNav({ className }: { className?: string }) {
-  const pathname = usePathname();
-  const navRef = useRef<HTMLElement>(null);
-  // On phones the nav scrolls sideways; keep the current section in view.
-  useEffect(() => {
-    const nav = navRef.current;
-    const current = nav?.querySelector<HTMLElement>('[aria-current="page"]');
-    if (nav && current && nav.scrollWidth > nav.clientWidth) {
-      const left = current.getBoundingClientRect().left - nav.getBoundingClientRect().left + nav.scrollLeft;
-      nav.scrollLeft = left - (nav.clientWidth - current.offsetWidth) / 2;
-    }
-  }, [pathname]);
-  return (
-    <nav ref={navRef} aria-label="Admin" className={className}>
-      <ul className="flex items-center gap-1 text-sm">
-        {navItems.map((item) => {
-          const current = item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
-          return (
-            <li key={item.href} className="shrink-0">
-              <Link
-                href={item.href}
-                aria-current={current ? "page" : undefined}
-                className={cn(
-                  "block rounded-sm px-2.5 py-1.5 hover:bg-ink/5 hover:text-ink",
-                  current ? "bg-ink/[0.06] font-medium text-ink" : "text-mute",
-                )}
-              >
-                {item.label}
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
-    </nav>
-  );
-}
-
 const statusLabel = (v: string) => leadStatuses.find((s) => s.value === v)?.label ?? v;
+
+const pipelineFieldLabels: Record<string, string> = {
+  nextFollowUp: "next follow-up",
+  lastContacted: "last contacted",
+  meetingAt: "meeting",
+  proposalDetails: "proposal details",
+  lossReason: "loss reason",
+};
+
+/** "fields: nextFollowUp, meetingAt" → "next follow-up, meeting". */
+const pipelineFieldList = (detail: string) =>
+  detail
+    .replace(/^fields: /, "")
+    .split(", ")
+    .map((f) => pipelineFieldLabels[f] ?? f)
+    .join(", ");
 
 /** "Asha Rao <asha@x.in>: disabled" → ["Asha Rao <asha@x.in>", "disabled"]. */
 function splitAdminDetail(detail: string): [string, string] {
@@ -366,8 +272,21 @@ function describeActivity(e: ActivityEntry, lead: ReactNode | null): ReactNode {
           {e.detail && <span className="text-mute"> ({e.detail.replace(/^fields: /, "")})</span>}
         </>
       );
+    case "pipeline_updated":
+      return (
+        <>
+          Updated the pipeline of {subject}
+          {e.detail && <span className="text-mute"> ({pipelineFieldList(e.detail)})</span>}
+        </>
+      );
     case "lead_deleted":
       return <>Deleted the lead {subject}</>;
+    case "content_saved":
+      return <>Edited website content{e.detail && <span className="text-mute"> ({e.detail})</span>}</>;
+    case "content_published":
+      return <>Published website content{e.detail && <span className="text-mute"> ({e.detail})</span>}</>;
+    case "content_reverted":
+      return <>Restored website content{e.detail && <span className="text-mute"> ({e.detail})</span>}</>;
     case "export":
       return <>Exported leads{e.detail && <span className="text-mute"> ({e.detail})</span>}</>;
     case "admin_created":

@@ -61,10 +61,18 @@ const monthYearFmt = new Intl.DateTimeFormat("en-IN", { month: "short", year: "n
 const monthDate = (m: string) => new Date(`${m}-01T00:00:00Z`);
 
 /** Vertical bars, one per month (YYYY-MM), oldest first. */
-export function MonthlyBars({ data, noun = "request" }: { data: { month: string; count: number }[]; noun?: string }) {
+export function MonthlyBars({
+  data,
+  noun = "request",
+  nounPlural = `${noun}s`,
+}: {
+  data: { month: string; count: number }[];
+  noun?: string;
+  nounPlural?: string;
+}) {
   const max = Math.max(0, ...data.map((d) => d.count));
   const total = data.reduce((a, d) => a + d.count, 0);
-  const plural = (n: number) => `${n} ${n === 1 ? noun : `${noun}s`}`;
+  const plural = (n: number) => `${n} ${n === 1 ? noun : nounPlural}`;
   const first = data[0] ? monthYearFmt.format(monthDate(data[0].month)) : "";
   const last = data.at(-1) ? monthYearFmt.format(monthDate(data.at(-1)!.month)) : "";
   // Selective direct labels: the peak and the latest month, not every bar.
@@ -73,7 +81,7 @@ export function MonthlyBars({ data, noun = "request" }: { data: { month: string;
 
   const summary =
     total === 0
-      ? `No ${noun}s from ${first} to ${last}.`
+      ? `No ${nounPlural} from ${first} to ${last}.`
       : `${plural(total)} from ${first} to ${last}. Busiest month: ${monthYearFmt.format(
           monthDate(data[peakIndex].month),
         )} with ${max}.${peakIndex === data.length - 1 ? "" : ` ${last}: ${data.at(-1)!.count}.`}`;
@@ -126,7 +134,7 @@ export function MonthlyBars({ data, noun = "request" }: { data: { month: string;
         </div>
       </div>
       <DataTable
-        caption={`${noun[0].toUpperCase()}${noun.slice(1)}s per month`}
+        caption={`${nounPlural[0].toUpperCase()}${nounPlural.slice(1)} per month`}
         head={["Month", "Count"]}
         rows={data.map((d) => [monthYearFmt.format(monthDate(d.month)), String(d.count)])}
       />

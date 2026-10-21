@@ -12,14 +12,18 @@ import { ResponsibilitySplit } from "@/components/sections/responsibility-split"
 import { TeamSection } from "@/components/sections/team";
 import { WhatWeDoSection } from "@/components/sections/what-we-do";
 import { WhySection } from "@/components/sections/why";
-import { pageMetadata, type PageSeo } from "@/lib/seo";
-import { site } from "@/lib/site";
+import type { Metadata } from "next";
+import { getHomepage } from "@/lib/cms";
+import { cmsPageSeo, pageMetadata } from "@/lib/seo";
 
-const page: PageSeo = { title: site.title, absoluteTitle: true, description: site.description, path: "/" };
+const seo = () => cmsPageSeo("/");
 
-export const metadata = pageMetadata(page);
+export async function generateMetadata(): Promise<Metadata> {
+  return pageMetadata(await seo());
+}
 
-export default function HomePage() {
+export default async function HomePage() {
+  const [page, home] = await Promise.all([seo(), getHomepage()]);
   return (
     <>
       <PageJsonLd page={page} />
@@ -31,7 +35,7 @@ export default function HomePage() {
       <EcosystemSection />
       <HowItWorksSection />
       <ResponsibilitySplit />
-      <ExperienceSection />
+      <ExperienceSection intro={home.sections.experience} />
       <OutcomesSection />
       <ExpectationsSection />
       <FaqSection />

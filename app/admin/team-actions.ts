@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import * as z from "zod/mini";
 import type { ActionState } from "@/app/admin/actions";
 import { audit } from "@/lib/admin/audit";
-import { requireAdmin } from "@/lib/auth/admin";
+import { ownerPasswordConfigured, requireAdmin, startSession } from "@/lib/auth/admin";
 import { generatePassword, hashPassword, MIN_PASSWORD_LENGTH, verifyPassword } from "@/lib/auth/password";
 import { getLeadStore } from "@/lib/leads/store";
 import type { AdminAccount } from "@/lib/leads/types";
@@ -99,12 +99,20 @@ export async function setAdminDisabled(_prev: TeamState, formData: FormData): Pr
     }
     if (disable) {
       if (target.id === session.id) return { error: "You can't disable your own account.", at: Date.now() };
-      // With no active accounts the panel falls back to the shared password, so keep at least one.
-      if ((await store.countActiveAdmins()) <= 1) {
-        return { error: "This is the last active account. Add or enable another one first.", at: Date.now() };
+      if (ownerPasswordConfigured()) {
+        // The primary admin can always sign in, so the last named account may go too.
+        await store.updateAdmin(id, { disabled: true });
+      } else {
+        // Without a primary admin, the last active account is the only way in: keep it (atomically).
+        const r = await store.disableAdminIfNotLast(id);
+        if (r === "missing") return { error: "That account no longer exists.", at: Date.now() };
+        if (r === "last") {
+          return { error: "This is the last active account. Add or enable another one first.", at: Date.now() };
+        }
       }
+    } else {
+      await store.updateAdmin(id, { disabled: false });
     }
-    await store.updateAdmin(id, { disabled: disable });
   } catch {
     return { error: "Couldn't update the account. Try again.", at: Date.now() };
   }
@@ -125,6 +133,7 @@ export async function resetAdminPassword(_prev: TeamState, formData: FormData): 
   try {
     target = await store.getAdmin(id);
     if (!target) return { error: "That account no longer exists.", at: Date.now() };
+    // Their existing sessions end on their next request (the session carries a password fingerprint).
     await store.updateAdmin(id, { passwordHash: await hashPassword(password) });
   } catch {
     return { error: "Couldn't reset the password. Try again.", at: Date.now() };
@@ -144,7 +153,7 @@ export async function resetAdminPassword(_prev: TeamState, formData: FormData): 
 export async function changeOwnPassword(_prev: PasswordState, formData: FormData): Promise<PasswordState> {
   const session = await requireAdmin();
   if (session.isOwner) {
-    return { error: "The shared password is set on the server (ADMIN_PASSWORD_HASH), not here.", at: Date.now() };
+    return { error: "The primary admin's password is set on the server (ADMIN_PASSWORD_HASH), not here.", at: Date.now() };
   }
   const current = String(formData.get("current") ?? "");
   const next = String(formData.get("next") ?? "");
@@ -152,6 +161,7 @@ export async function changeOwnPassword(_prev: PasswordState, formData: FormData
 
   const fieldErrors: NonNullable<PasswordState["fieldErrors"]> = {};
   if (!current) fieldErrors.current = "Enter your current password.";
+  else if (current.length > 200) fieldErrors.current = "That isn't your current password.";
   if (next.length < MIN_PASSWORD_LENGTH) fieldErrors.next = `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
   // Long enough for any passphrase, short enough that hashing it can't be used to tie up the server.
   else if (next.length > 200) fieldErrors.next = "Keep this under 200 characters.";
@@ -161,6 +171,7 @@ export async function changeOwnPassword(_prev: PasswordState, formData: FormData
 
   const store = await getLeadStore();
   if (!store) return { error: NO_STORE, at: Date.now() };
+  let newHash: string;
   try {
     const account = await store.getAdmin(session.id);
     if (!account || !(await verifyPassword(current, account.passwordHash))) {
@@ -170,10 +181,17 @@ export async function changeOwnPassword(_prev: PasswordState, formData: FormData
         at: Date.now(),
       };
     }
-    await store.updateAdmin(session.id, { passwordHash: await hashPassword(next) });
+    newHash = await hashPassword(next);
+    await store.updateAdmin(session.id, { passwordHash: newHash });
   } catch {
     return { error: "Couldn't change your password. Try again.", at: Date.now() };
   }
+  // Every other session for this account ends on its next request; this one is re-issued so it stays signed in.
+  await startSession(session, newHash);
   await audit(session, "password_changed");
-  return { ok: true, message: "Password changed. Use it next time you sign in.", at: Date.now() };
+  return {
+    ok: true,
+    message: "Password changed. Your other signed-in sessions have been signed out.",
+    at: Date.now(),
+  };
 }

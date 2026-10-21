@@ -1,7 +1,8 @@
 import "server-only";
+import type { ContactInfo } from "@/lib/cms";
 import { site } from "@/lib/site";
 import { allEventTypes, labelFor, type LeadData } from "@/lib/validation/lead";
-import { notificationAddress, type Email } from "./index";
+import type { Email } from "./index";
 
 /**
  * Confirmation sent to the person who submitted the contact form.
@@ -22,9 +23,17 @@ const steps = [
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
-export function leadAcknowledgement(lead: Pick<LeadData, "email" | "eventType">): Email {
+/**
+ * `contact`: the published contact details (getContactInfo({ published: true })).
+ * `replyTo`: where replies go, the same inbox as lead notifications (notificationAddress()).
+ */
+export function leadAcknowledgement(
+  lead: Pick<LeadData, "email" | "eventType">,
+  opts: { contact: Pick<ContactInfo, "email" | "primaryContact">; replyTo: string },
+): Email {
   const enquiry = labelFor(allEventTypes, lead.eventType);
-  const contact = site.primaryContact;
+  const contact = opts.contact.primaryContact;
+  const email = opts.contact.email;
 
   const text = [
     `Thank you for contacting ${site.name}.`,
@@ -34,7 +43,7 @@ export function leadAcknowledgement(lead: Pick<LeadData, "email" | "eventType">)
     "What happens next",
     ...steps.map(([title, body], i) => `${i + 1}. ${title} — ${body}`),
     "",
-    `To talk sooner, call ${contact.name} (${contact.role}) on ${contact.phone.display}, or email ${site.email}.`,
+    `To talk sooner, call ${contact.name} (${contact.role}) on ${contact.phone.display}, or email ${email}.`,
     "You can also reply to this email.",
     "",
     `If you didn't send an enquiry to ${site.name}, you can ignore this email.`,
@@ -62,13 +71,13 @@ ${steps
   .join("")}
 </table></td></tr>
 <tr><td style="padding:20px 32px 28px">
-<p style="margin:0;font-size:14px;line-height:1.6">To talk sooner, call ${esc(contact.name)} (${esc(contact.role)}) on <a href="${esc(contact.phone.href)}" style="color:#0a0b0d">${esc(contact.phone.display)}</a>, or email <a href="mailto:${esc(site.email)}" style="color:#0a0b0d">${esc(site.email)}</a>. You can also reply to this email.</p>
+<p style="margin:0;font-size:14px;line-height:1.6">To talk sooner, call ${esc(contact.name)} (${esc(contact.role)}) on <a href="${esc(contact.phone.href)}" style="color:#0a0b0d">${esc(contact.phone.display)}</a>, or email <a href="mailto:${esc(email)}" style="color:#0a0b0d">${esc(email)}</a>. You can also reply to this email.</p>
 <p style="margin:16px 0 0;font-size:12px;color:#5b5e66">If you didn't send an enquiry to ${esc(site.name)}, you can ignore this email.</p>
 </td></tr></table></td></tr></table></body></html>`;
 
   return {
     to: lead.email,
-    replyTo: notificationAddress(),
+    replyTo: opts.replyTo,
     subject: `We've received your enquiry — ${site.name}`,
     text,
     html,

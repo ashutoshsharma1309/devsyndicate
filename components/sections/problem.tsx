@@ -1,21 +1,20 @@
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
+import { getHomepage } from "@/lib/cms";
 import { problems } from "@/lib/content";
 
-export function ProblemSection() {
+export async function ProblemSection() {
+  const intro = (await getHomepage()).sections.problem;
   return (
     <Section aria-labelledby="problem-title">
       <Container>
         <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-5">
             <div className="lg:sticky lg:top-32">
-              <SectionLabel>The problem</SectionLabel>
-              <SectionHeading id="problem-title" className="mt-6" >
-                Running a great hackathon is harder than it looks.
+              <SectionLabel>{intro.label}</SectionLabel>
+              <SectionHeading id="problem-title" className="mt-6">
+                {intro.heading}
               </SectionHeading>
-              <p className="t-lead mt-6 max-w-md text-mute">
-                The idea is simple. The work behind it isn&apos;t — and it usually lands on a few faculty members who
-                already have full-time jobs.
-              </p>
+              <p className="t-lead mt-6 max-w-md text-mute">{intro.description}</p>
             </div>
           </div>
 

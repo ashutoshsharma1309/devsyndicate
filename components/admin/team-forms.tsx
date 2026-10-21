@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { startTransition, useActionState, useEffect, useRef, useState } from "react";
 import {
   changeOwnPassword,
   createAdminAccount,
@@ -61,8 +62,8 @@ function TemporaryPassword({ password, account, onDone }: { password: string; ac
       </div>
       <p className="mt-3 text-sm text-mute">
         It&apos;s shown only once and can&apos;t be recovered. Share it privately (in person or a direct message,
-        not a group chat or email thread) and ask them to change it under <strong className="font-medium text-ink">Account</strong>{" "}
-        after signing in.
+        not a group chat or email thread). They sign in with their email in the Username field, then change it under{" "}
+        <strong className="font-medium text-ink">Settings</strong>.
       </p>
       <Button type="button" variant="ghost" onClick={onDone} className="mt-3 h-auto text-sm">
         Done — hide it
@@ -155,6 +156,20 @@ export function AdminRowActions({
   const [resetState, reset, resetting] = useActionState(resetAdminPassword, {} as TeamState);
   const [confirmingReset, setConfirmingReset] = useState(false);
   const { shown, hide } = useShownPassword(resetState);
+  // Keep keyboard focus on the control that replaces the one just used (the confirm step swaps
+  // buttons in and out). Only after a user action, so nothing steals focus on first render.
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    (confirmingReset ? confirmRef : triggerRef).current?.focus();
+  }, [confirmingReset]);
+  const showConfirm = (v: boolean) => {
+    toggled.current = true;
+    setConfirmingReset(v);
+  };
+  const warnId = `reset-warn-${id}`;
   // The most recent of the two actions decides the toast.
   const last = (toggleState.at ?? 0) > (resetState.at ?? 0) ? toggleState : resetState;
 
@@ -182,33 +197,47 @@ export function AdminRowActions({
           (confirmingReset ? (
             <form
               action={(fd) => {
-                setConfirmingReset(false);
+                showConfirm(false);
                 return reset(fd);
               }}
               className="flex flex-wrap items-center gap-2"
             >
               <input type="hidden" name="id" value={id} />
-              <span className="text-sm text-mute">Their current password stops working.</span>
-              <Button type="submit" disabled={resetting} className={small}>
+              <span id={warnId} className="text-sm text-mute">
+                Their current password stops working.
+              </span>
+              <Button
+                ref={confirmRef}
+                type="submit"
+                disabled={resetting}
+                className={small}
+                aria-label={`Confirm password reset for ${name}`}
+                aria-describedby={warnId}
+              >
                 Reset password
               </Button>
-              <Button type="button" variant="ghost" onClick={() => setConfirmingReset(false)} className="h-9 text-sm">
+              <Button type="button" variant="ghost" onClick={() => showConfirm(false)} className="h-9 text-sm">
                 Cancel
               </Button>
             </form>
           ) : (
             <Button
+              ref={triggerRef}
               type="button"
               variant="secondary"
               disabled={resetting}
-              onClick={() => setConfirmingReset(true)}
+              onClick={() => showConfirm(true)}
               className={small}
               aria-label={`Reset password for ${name}`}
             >
               {resetting ? "Resetting…" : "Reset password"}
             </Button>
           ))}
-        {isSelf && <span className="text-sm text-mute">Change your password under Account.</span>}
+        {isSelf && (
+          <Link href="/admin/settings" className="text-sm text-signal underline-offset-4 hover:underline">
+            Change your password in Settings
+          </Link>
+        )}
       </div>
       {shown && <TemporaryPassword key={resetState.at} password={shown} account={resetState.account} onDone={hide} />}
       <Toast message={last.error ?? last.message} stamp={last.at} tone={last.error ? "error" : "success"} />
@@ -234,7 +263,18 @@ export function ChangePasswordForm({ minLength }: { minLength: number }) {
   }, [state.at, state.ok, state.fieldErrors]);
 
   return (
-    <form ref={formRef} action={action} noValidate className="space-y-5">
+    // Submitted via onSubmit rather than the `action` prop: React resets a form after every function
+    // action, which would wipe all three fields after a typo. The effect above clears them on success only.
+    <form
+      ref={formRef}
+      noValidate
+      className="space-y-5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget);
+        startTransition(() => action(fd));
+      }}
+    >
       {passwordInputs.map((f) => {
         const id = `pw-${f.name}`;
         const error = state.fieldErrors?.[f.name];

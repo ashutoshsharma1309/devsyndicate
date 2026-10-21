@@ -1,12 +1,13 @@
 "use server";
 
-import { headers } from "next/headers";
+import { draftMode, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import * as z from "zod/mini";
 import { audit } from "@/lib/admin/audit";
 import {
-  checkPassword,
+  checkOwnerCredentials,
+  endPreviewSession,
   endSession,
   loginMode,
   ownerLoginAllowed,
@@ -19,83 +20,123 @@ import {
 import { generatePassword, hashPassword, verifyPassword } from "@/lib/auth/password";
 import { safeAdminPath } from "@/lib/auth/session";
 import { getLeadStore } from "@/lib/leads/store";
-import { contactFields, isLeadStatus, leadStatuses, type ContactFields, type LeadStore } from "@/lib/leads/types";
-import { clientIp, hashIp, rateLimit } from "@/lib/rate-limit";
+import {
+  contactFields,
+  isLeadStatus,
+  leadStatuses,
+  normaliseText,
+  validatePipelinePatch,
+  type ContactFields,
+  type LeadStore,
+  type PipelinePatch,
+} from "@/lib/leads/types";
+import { clearRateLimit, clientIp, hashIp, rateLimit } from "@/lib/rate-limit";
 import { leadSchema } from "@/lib/validation/lead";
 
-export type ActionState = { ok?: boolean; error?: string; message?: string; at?: number };
+export type ActionState = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+  at?: number;
+  /** Sign-in only: the username as typed, so a failed attempt doesn't clear it. Never the password. */
+  username?: string;
+};
 
 const LOGIN_WINDOW_MS = 15 * 60_000;
 const MAX_LOGIN_FAILURES = 10;
 
-// One message for every failure, so the form doesn't reveal which emails have accounts.
-const NAMED_LOGIN_ERROR = "That email and password don't match an active account.";
+// One message for every failure, so the form never reveals which credential was wrong.
+const LOGIN_ERROR = "That username and password don't match.";
 
 // Verified against when the email has no account, so a miss takes as long as a wrong password.
 let dummyHash: Promise<string> | undefined;
 
-/** Only a plausible address goes into the log, so a password typed into the email box never does. */
+/** Only a plausible address goes into the log, so a password typed into the username box never does. */
 const loggableEmail = (email: string) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null);
+
+type Authenticated = { session: AdminSession; passwordHash?: string };
 
 async function authenticate(
   mode: LoginMode,
   store: LeadStore | null,
-  email: string,
+  identifier: string,
   password: string,
-): Promise<AdminSession | null> {
-  if (mode === "named" && email) {
+): Promise<Authenticated | null> {
+  // The primary admin: ADMIN_USERNAME + ADMIN_PASSWORD_HASH.
+  if (ownerLoginAllowed(mode)) {
+    const owner = await checkOwnerCredentials(identifier, password);
+    if (owner) return { session: owner };
+  }
+  // Additional named admins sign in with their email address.
+  const email = identifier.toLowerCase();
+  if (mode === "named" && email.includes("@")) {
     if (!store) return null;
     try {
       const account = await store.findAdminByEmail(email);
       dummyHash ??= hashPassword(generatePassword());
       const ok = await verifyPassword(password, account?.passwordHash ?? (await dummyHash));
       if (!account || !ok || account.disabled) return null;
-      return { id: account.id, name: account.name, email: account.email, isOwner: false };
+      return {
+        session: { id: account.id, name: account.name, email: account.email, isOwner: false },
+        passwordHash: account.passwordHash,
+      };
     } catch (err) {
       console.error("[auth] Couldn't check the admin account:", (err as { code?: string })?.code ?? "unknown error");
       return null;
     }
   }
-  // Bootstrap, or break-glass (ADMIN_ALLOW_OWNER_LOGIN) with the email left empty.
-  if (!ownerLoginAllowed(mode) || !(await checkPassword(password))) return null;
-  return { id: "owner", name: "Owner", email: null, isOwner: true };
+  return null;
 }
 
 export async function login(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const identifier = String(formData.get("username") ?? "").trim().slice(0, 200);
+  const password = formData.get("password");
+  const fail = (error: string): ActionState => ({ error, username: identifier, at: Date.now() });
+
   const mode = await loginMode();
-  if (mode === "unconfigured") return { error: "Admin access isn't configured on this server." };
+  if (mode === "unconfigured") return fail("Admin access isn't configured on this server.");
 
   const ip = clientIp(await headers());
-  // Per server instance; the store-backed count below holds across instances.
-  const limit = rateLimit(`login:${ip}`, MAX_LOGIN_FAILURES, LOGIN_WINDOW_MS);
-  if (!limit.ok) return { error: `Too many attempts. Try again in ${Math.ceil(limit.retryAfter / 60)} minutes.` };
+  // Per server instance, failures only; the store-backed count below holds across instances.
+  const limitKey = `login:${ip}`;
+  // Count this attempt up front, synchronously (no await between check and increment), so a
+  // burst of parallel guesses can't all pass the check before any of them is recorded. A
+  // successful sign-in clears the count below.
+  const limit = rateLimit(limitKey, MAX_LOGIN_FAILURES, LOGIN_WINDOW_MS);
+  if (!limit.ok) return fail(`Too many attempts. Try again in ${Math.ceil(limit.retryAfter / 60)} minutes.`);
 
   const store = await getLeadStore();
   const failureKey = `login:${hashIp(ip)}`;
   if (store) {
     try {
+      // Same idea across server instances: record first, then count (this attempt included).
+      await store.recordLoginFailure(failureKey);
       const failures = await store.countLoginFailures(failureKey, new Date(Date.now() - LOGIN_WINDOW_MS));
-      if (failures >= MAX_LOGIN_FAILURES) return { error: "Too many attempts. Try again in 15 minutes." };
+      if (failures > MAX_LOGIN_FAILURES) return fail("Too many attempts. Try again in 15 minutes.");
     } catch (err) {
       console.error("[auth] Couldn't check sign-in failures:", (err as { code?: string })?.code ?? "unknown error");
     }
   }
 
-  const email = String(formData.get("email") ?? "").trim().toLowerCase().slice(0, 200);
-  const password = formData.get("password");
-  const session = typeof password === "string" && password ? await authenticate(mode, store, email, password) : null;
+  // Long enough for any passphrase, short enough that hashing it can't be used to tie up the server.
+  const result =
+    identifier && typeof password === "string" && password && password.length <= 200
+      ? await authenticate(mode, store, identifier, password)
+      : null;
 
-  if (!session) {
-    await store?.recordLoginFailure(failureKey).catch(() => undefined);
-    await audit(null, "login_failed", { detail: loggableEmail(email) });
-    return { error: mode === "named" ? NAMED_LOGIN_ERROR : "That password isn't right." };
+  if (!result) {
+    // Already counted above, in memory and in the store.
+    await audit(null, "login_failed", { detail: loggableEmail(identifier.toLowerCase()) });
+    return fail(LOGIN_ERROR);
   }
 
+  const { session, passwordHash } = result;
+  clearRateLimit(limitKey);
   await store?.clearLoginFailures(failureKey).catch(() => undefined);
   if (!session.isOwner) await store?.touchAdminLogin(session.id).catch(() => undefined);
-  await startSession(session);
+  await startSession(session, passwordHash);
   await audit(session, "login");
-  redirect(safeAdminPath(formData.get("next")) ?? "/admin/leads");
+  redirect(safeAdminPath(formData.get("next")) ?? "/admin");
 }
 
 export async function logout() {
@@ -103,6 +144,9 @@ export async function logout() {
   const session = await sessionFromCookie();
   if (session) await audit(session, "logout");
   await endSession();
+  // End any draft preview too, so unpublished content doesn't keep showing on the public site.
+  (await draftMode()).disable();
+  await endPreviewSession();
   redirect("/admin/login");
 }
 
@@ -134,10 +178,63 @@ export async function updateLeadStatus(_prev: ActionState, formData: FormData): 
   return { ok: true, message: `Status set to ${label}.`, at: Date.now() };
 }
 
+export type PipelineState = ActionState & {
+  fieldErrors?: Partial<Record<keyof PipelinePatch, string>>;
+};
+
+const pipelineKeys = ["status", "nextFollowUp", "lastContacted", "meetingAt", "proposalDetails", "lossReason"] as const;
+
+/**
+ * `<input type="datetime-local">` sends "YYYY-MM-DDTHH:mm" with no offset; the team works in
+ * India, so read it as Asia/Kolkata time. Values with an offset pass through unchanged.
+ */
+const withIstOffset = (v: string) => (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(v) ? `${v}+05:30` : v);
+
+/**
+ * Sets pipeline fields on a lead. formData: `id`, plus any of status, nextFollowUp and
+ * lastContacted (YYYY-MM-DD, "" clears), meetingAt (datetime-local or ISO, "" clears),
+ * proposalDetails, lossReason. Only the fields present in the form change.
+ */
+export async function updateLeadPipeline(_prev: PipelineState, formData: FormData): Promise<PipelineState> {
+  const session = await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  const input: Record<string, unknown> = {};
+  for (const k of pipelineKeys) {
+    const v = formData.get(k);
+    if (v === null) continue;
+    if (typeof v !== "string") return { error: "Check the highlighted fields.", fieldErrors: { [k]: "Enter text." }, at: Date.now() };
+    input[k] = k === "meetingAt" && v ? withIstOffset(v.trim()) : k === "proposalDetails" || k === "lossReason" ? v : v.trim();
+  }
+  const checked = validatePipelinePatch(input as PipelinePatch);
+  if (!checked.ok) return { error: "Check the highlighted fields.", fieldErrors: checked.fieldErrors, at: Date.now() };
+  const patch = checked.patch;
+
+  let before;
+  try {
+    const store = await storeOrThrow();
+    before = (await store.get(id))?.lead;
+    if (!before) return { error: "That lead no longer exists.", at: Date.now() };
+    await store.updatePipeline(id, patch);
+  } catch {
+    return { error: "Couldn't save the pipeline details. Try again.", at: Date.now() };
+  }
+  if (patch.status !== undefined && patch.status !== before.status) {
+    await audit(session, "status_changed", { leadId: id, leadLabel: before.institution, detail: `${before.status} → ${patch.status}` });
+  }
+  // Field names only: proposal and loss text may hold personal details.
+  const changed = pipelineKeys.filter((k) => k !== "status" && patch[k] !== undefined && patch[k] !== before[k]);
+  if (changed.length > 0) {
+    await audit(session, "pipeline_updated", { leadId: id, leadLabel: before.institution, detail: `fields: ${changed.join(", ")}` });
+  }
+  revalidatePath("/admin", "layout");
+  return { ok: true, message: "Pipeline details saved.", at: Date.now() };
+}
+
 export async function addLeadNote(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const session = await requireAdmin();
   const id = String(formData.get("id") ?? "");
-  const body = String(formData.get("body") ?? "").trim();
+  // Forms submit line breaks as CRLF; normalise first so the 4,000 limit matches what the textarea counted.
+  const body = normaliseText(String(formData.get("body") ?? ""));
   if (!body) return { error: "Write a note first." };
   if (body.length > 4000) return { error: "Keep notes under 4,000 characters." };
   let lead;

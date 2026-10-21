@@ -7,11 +7,15 @@ import {
   contactFields,
   dateRange,
   groupOrganisations,
+  isOpenStatus,
   istMonth,
+  istToday,
   last12Months,
   MAX_LIST_ALL,
+  organisationKey,
   pageOf,
   searchFields,
+  validatePipelinePatch,
   zeroByEventType,
   zeroByOrgType,
   zeroByStatus,
@@ -75,22 +79,47 @@ function mutate<T>(fn: (db: Db) => T): Promise<T> {
   return run;
 }
 
-const strip = (row: Db["leads"][number]): Lead => {
-  const lead: Partial<Db["leads"][number]> = { ...row, orgType: row.orgType ?? "" };
+type Row = Db["leads"][number];
+
+/** Leads written before a field existed read back with the same defaults as the Postgres columns. */
+const withDefaults = (row: Row): Row => ({
+  ...row,
+  orgType: row.orgType ?? "",
+  nextFollowUp: row.nextFollowUp ?? null,
+  lastContacted: row.lastContacted ?? null,
+  meetingAt: row.meetingAt ?? null,
+  proposalDetails: row.proposalDetails ?? "",
+  lossReason: row.lossReason ?? "",
+});
+
+const strip = (row: Row): Lead => {
+  const lead: Partial<Row> = withDefaults(row);
   delete lead.ipHash;
   return lead as Lead;
 };
 
-/** Newest first, matching the Postgres store's order. */
+const order: Record<NonNullable<LeadFilters["sort"]>, (a: Row, b: Row) => number> = {
+  newest: (a, b) => b.createdAt.localeCompare(a.createdAt),
+  oldest: (a, b) => a.createdAt.localeCompare(b.createdAt),
+  updated: (a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.createdAt.localeCompare(a.createdAt),
+};
+
+/** Same filters and order as the Postgres store (default: newest first). */
 function matching(leads: Db["leads"], f: Omit<LeadFilters, "page" | "pageSize">) {
   const q = f.q?.trim().toLowerCase();
   const { start, end } = dateRange(f);
+  const today = istToday();
   return leads
+    .map(withDefaults)
     .filter((l) => (!f.status || l.status === f.status) && (!f.eventType || l.eventType === f.eventType))
     .filter((l) => !f.orgType || (f.orgType === "unknown" ? !l.orgType : l.orgType === f.orgType))
     .filter((l) => (!start || l.createdAt >= start.toISOString()) && (!end || l.createdAt < end.toISOString()))
     .filter((l) => !q || searchFields.some((k) => (l[k] ?? "").toLowerCase().includes(q)))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .filter((l) => !f.org || organisationKey(l.institution) === f.org)
+    .filter((l) => !f.notifyStatus || l.notifyStatus === f.notifyStatus)
+    .filter((l) => !f.open || isOpenStatus(l.status))
+    .filter((l) => !f.followUpDue || (isOpenStatus(l.status) && l.nextFollowUp !== null && l.nextFollowUp <= today))
+    .sort(order[f.sort ?? "newest"] ?? order.newest);
 }
 
 export const fileStore: LeadStore = {
@@ -98,7 +127,19 @@ export const fileStore: LeadStore = {
 
   create({ ipHash, ...data }) {
     const now = new Date().toISOString();
-    const lead = { ...data, id: randomUUID(), status: "new" as const, createdAt: now, updatedAt: now, ipHash };
+    const lead: Row = {
+      ...data,
+      id: randomUUID(),
+      status: "new" as const,
+      createdAt: now,
+      updatedAt: now,
+      ipHash,
+      nextFollowUp: null,
+      lastContacted: null,
+      meetingAt: null,
+      proposalDetails: "",
+      lossReason: "",
+    };
     return mutate((db) => {
       db.leads.unshift(lead);
       return strip(lead);
@@ -135,6 +176,29 @@ export const fileStore: LeadStore = {
     });
   },
 
+  async updatePipeline(id, input) {
+    const checked = validatePipelinePatch(input);
+    if (!checked.ok) throw new Error("invalid_pipeline");
+    const { patch } = checked;
+    await mutate((db) => {
+      const lead = db.leads.find((l) => l.id === id);
+      if (!lead) return;
+      if (patch.status !== undefined) lead.status = patch.status;
+      if (patch.nextFollowUp !== undefined) lead.nextFollowUp = patch.nextFollowUp;
+      if (patch.lastContacted !== undefined) lead.lastContacted = patch.lastContacted;
+      if (patch.meetingAt !== undefined) lead.meetingAt = patch.meetingAt;
+      if (patch.proposalDetails !== undefined) lead.proposalDetails = patch.proposalDetails;
+      if (patch.lossReason !== undefined) lead.lossReason = patch.lossReason;
+      lead.updatedAt = new Date().toISOString();
+    });
+  },
+
+  async existingLeadIds(ids) {
+    const wanted = new Set(ids);
+    if (wanted.size === 0) return new Set();
+    return new Set((await load()).leads.filter((l) => wanted.has(l.id)).map((l) => l.id));
+  },
+
   async addNote(leadId, body) {
     await mutate((db) => {
       const lead = db.leads.find((l) => l.id === leadId);
@@ -161,7 +225,9 @@ export const fileStore: LeadStore = {
     const since30 = new Date(Date.now() - 30 * DAY_MS).toISOString();
     let last30Days = 0;
     let notifyFailed = 0;
-    for (const l of leads) {
+    let followUpsDue = 0;
+    const today = istToday();
+    for (const l of leads.map(withDefaults)) {
       byStatus[l.status]++;
       byOrgType[l.orgType || "unknown"]++;
       byEventType[l.eventType] = (byEventType[l.eventType] ?? 0) + 1;
@@ -169,6 +235,7 @@ export const fileStore: LeadStore = {
       if (byMonth.has(m)) byMonth.set(m, byMonth.get(m)! + 1);
       if (l.createdAt >= since30) last30Days++;
       if (l.notifyStatus === "failed") notifyFailed++;
+      if (isOpenStatus(l.status) && l.nextFollowUp !== null && l.nextFollowUp <= today) followUpsDue++;
     }
     return {
       total: leads.length,
@@ -180,6 +247,11 @@ export const fileStore: LeadStore = {
       won: byStatus.won,
       lost: byStatus.lost,
       notifyFailed,
+      open: leads.length - byStatus.won - byStatus.lost,
+      meetings: byStatus.meeting,
+      proposals: byStatus.proposal,
+      newLeads: byStatus.new,
+      followUpsDue,
     };
   },
 
@@ -238,7 +310,7 @@ export const fileStore: LeadStore = {
 
   async activity(opts = {}) {
     return (await load()).activity
-      .filter((a) => !opts.leadId || a.leadId === opts.leadId)
+      .filter((a) => (!opts.leadId || a.leadId === opts.leadId) && (!opts.action || a.action === opts.action))
       .sort((a, b) => b.at.localeCompare(a.at))
       .slice(0, activityLimit(opts.limit));
   },
@@ -293,6 +365,18 @@ export const fileStore: LeadStore = {
 
   async countActiveAdmins() {
     return (await load()).admins.filter((a) => !a.disabled).length;
+  },
+
+  disableAdminIfNotLast(id) {
+    // Inside the write queue, so the count and the change can't interleave with another disable.
+    return mutate((db): "disabled" | "last" | "missing" => {
+      const admin = db.admins.find((a) => a.id === id);
+      if (!admin) return "missing";
+      if (admin.disabled) return "disabled";
+      if (db.admins.filter((a) => !a.disabled).length <= 1) return "last";
+      admin.disabled = true;
+      return "disabled";
+    });
   },
 
   async recordLoginFailure(key) {

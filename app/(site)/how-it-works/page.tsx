@@ -5,60 +5,37 @@ import { FinalCta } from "@/components/sections/final-cta";
 import { ResponsibilitySplit } from "@/components/sections/responsibility-split";
 import { ButtonLink } from "@/components/ui/button";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
-import { pageMetadata, type PageSeo } from "@/lib/seo";
+import type { Metadata } from "next";
+import { getHowItWorks } from "@/lib/cms";
+import { cmsPageSeo, pageMetadata } from "@/lib/seo";
 
-const page: PageSeo = {
-  title: "How Hackathon Planning Works",
-  breadcrumb: "How It Works",
-  description:
-    "How a hackathon partnership with Dev Syndicate works — from the first conversation to the post-event report, and exactly what your college and our team each handle.",
-  path: "/how-it-works",
-};
+const seo = () => cmsPageSeo("/how-it-works", { breadcrumb: "How It Works" });
 
-export const metadata = pageMetadata(page);
+export async function generateMetadata(): Promise<Metadata> {
+  return pageMetadata(await seo());
+}
 
-const afterContact = [
-  { title: "You send a request", body: "A short form about your institution, objectives and the event you have in mind." },
-  { title: "We review it", body: "We read through the details and prepare questions before we talk." },
-  { title: "A quick call", body: "We discuss goals, audience, dates and constraints — and what's realistic." },
-  { title: "A written proposal", body: "Format, timeline, scope, responsibilities and cost, so you can take it for approval." },
-];
-
-const windows = [
-  {
-    label: "Campus hackathon",
-    weeks: "6–8",
-    body: "Enough time for branding, campus outreach, registrations and a mentor panel.",
-  },
-  {
-    label: "National or industry-led",
-    weeks: "10–12",
-    body: "Room for wider outreach, industry judges, sponsors and multi-stage screening.",
-  },
-];
-
-export default function HowItWorksPage() {
+export default async function HowItWorksPage() {
+  const [page, content] = await Promise.all([seo(), getHowItWorks()]);
+  const { hero, stepsIntro, afterContact, timing } = content;
   return (
     <>
       <PageJsonLd page={page} />
       <PageHero
-        eyebrow="How it works"
-        title="From conversation to hackathon."
-        lead="A clear process, an agreed scope and a written split of responsibilities — so everyone on your side knows exactly what's expected of them, and what isn't."
+        eyebrow={hero.eyebrow}
+        title={hero.title}
+        lead={hero.lead}
         aside={
-          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/[0.09] bg-white/[0.09]">
-            {[
-              ["Process", "5 steps"],
-              ["Your contact", "One, throughout"],
-              ["Formats", "Online · Offline · Hybrid"],
-              ["Ends with", "A post-event report"],
-            ].map(([k, v]) => (
-              <div key={k} className="bg-ink/90 p-4">
-                <dt className="t-label text-mute-dark">{k}</dt>
-                <dd className="mt-2 text-[0.9375rem] text-white">{v}</dd>
-              </div>
-            ))}
-          </dl>
+          hero.facts.length > 0 ? (
+            <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/[0.09] bg-white/[0.09]">
+              {hero.facts.map((f, i) => (
+                <div key={`${i}-${f.label}`} className="bg-ink/90 p-4">
+                  <dt className="t-label text-mute-dark">{f.label}</dt>
+                  <dd className="mt-2 text-[0.9375rem] text-white">{f.value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : undefined
         }
       />
 
@@ -66,15 +43,12 @@ export default function HowItWorksPage() {
         <Container>
           <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
             <div className="lg:col-span-7">
-              <SectionLabel>The process</SectionLabel>
+              <SectionLabel>{stepsIntro.label}</SectionLabel>
               <SectionHeading id="steps-title" className="mt-6">
-                Five steps. Both sides know their part.
+                {stepsIntro.heading}
               </SectionHeading>
             </div>
-            <p className="t-lead text-mute lg:col-span-5">
-              Each step lists what we need from your college and what you get from us. Most of the work sits on our
-              side.
-            </p>
+            <p className="t-lead text-mute lg:col-span-5">{stepsIntro.description}</p>
           </div>
           <div className="mt-14 md:mt-20">
             <ProcessSteps variant="detailed" />
@@ -88,20 +62,18 @@ export default function HowItWorksPage() {
         <Container>
           <div className="grid gap-14 lg:grid-cols-12 lg:gap-16">
             <div className="lg:col-span-5">
-              <SectionLabel>Getting started</SectionLabel>
+              <SectionLabel>{afterContact.label}</SectionLabel>
               <SectionHeading id="first-title" className="mt-6">
-                What happens after you get in touch.
+                {afterContact.heading}
               </SectionHeading>
-              <p className="t-lead mt-6 text-mute">
-                No commitment until you&apos;ve seen a proposal and taken it through your internal approvals.
-              </p>
-              <ButtonLink href="/contact" size="lg" arrow className="mt-10">
-                Plan Your Hackathon
+              <p className="t-lead mt-6 text-mute">{afterContact.description}</p>
+              <ButtonLink href={afterContact.cta.href} size="lg" arrow className="mt-10">
+                {afterContact.cta.label}
               </ButtonLink>
             </div>
             <ol className="grid gap-px self-start overflow-hidden rounded-md border border-line bg-line sm:grid-cols-2 lg:col-span-7">
-              {afterContact.map((s, i) => (
-                <li key={s.title} data-reveal style={{ ["--reveal-i" as string]: i }} className="bg-paper p-6 md:p-8">
+              {afterContact.steps.map((s, i) => (
+                <li key={`${i}-${s.title}`} data-reveal style={{ ["--reveal-i" as string]: i }} className="bg-paper p-6 md:p-8">
                   <p className="font-mono text-sm text-signal">{String(i + 1).padStart(2, "0")}</p>
                   <h3 className="mt-5 text-[1.1875rem] font-medium tracking-[-0.02em]">{s.title}</h3>
                   <p className="mt-2 text-[0.9375rem] leading-relaxed text-mute">{s.body}</p>
@@ -115,19 +87,16 @@ export default function HowItWorksPage() {
       <Section tone="muted" aria-labelledby="timing-title">
         <Container>
           <div className="max-w-3xl">
-            <SectionLabel>Timing</SectionLabel>
+            <SectionLabel>{timing.label}</SectionLabel>
             <SectionHeading id="timing-title" className="mt-6">
-              How early to start.
+              {timing.heading}
             </SectionHeading>
-            <p className="t-lead mt-6 text-mute">
-              Our recommended planning windows. Shorter timelines can sometimes work — share your dates and we&apos;ll
-              tell you honestly what&apos;s feasible.
-            </p>
+            <p className="t-lead mt-6 text-mute">{timing.description}</p>
           </div>
           <ul className="mt-14 grid gap-4 md:grid-cols-2">
-            {windows.map((w, i) => (
+            {timing.windows.map((w, i) => (
               <li
-                key={w.label}
+                key={`${i}-${w.label}`}
                 data-reveal
                 style={{ ["--reveal-i" as string]: i }}
                 className="flex flex-col rounded-md border border-line bg-paper p-7 md:p-10"

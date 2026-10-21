@@ -1,24 +1,23 @@
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
+import { getHomepage } from "@/lib/cms";
 import { differentiators } from "@/lib/content";
 import { cn } from "@/lib/utils";
 
 const spans = ["md:col-span-3", "md:col-span-3", "md:col-span-2", "md:col-span-2", "md:col-span-2"];
 
-export function WhySection() {
+export async function WhySection() {
+  const intro = (await getHomepage()).sections.why;
   return (
     <Section tone="muted" aria-labelledby="why-title">
       <Container>
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">
-            <SectionLabel>Why Dev Syndicate</SectionLabel>
+            <SectionLabel>{intro.label}</SectionLabel>
             <SectionHeading id="why-title" className="mt-6">
-              Not just another college event.
+              {intro.heading}
             </SectionHeading>
           </div>
-          <p className="t-lead text-mute lg:col-span-5">
-            A hackathon run well puts your institution in front of students, companies and other campuses. That only
-            happens when it&apos;s designed for it.
-          </p>
+          <p className="t-lead text-mute lg:col-span-5">{intro.description}</p>
         </div>
 
         <ul className="mt-14 grid border-l border-t border-line md:mt-20 md:grid-cols-6">

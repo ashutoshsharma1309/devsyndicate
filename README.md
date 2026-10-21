@@ -15,7 +15,7 @@ npm run dev
 | `npm run lint` · `npm run typecheck` | ESLint · TypeScript |
 | `npm test` | Unit tests (Node's built-in runner, Node 22.6+) |
 | `BASE_URL=… npm run smoke` | Smoke-test a running server: pages, canonicals, sitemap, robots, API guards. Never submits a lead |
-| `npm run db:setup` | Create or upgrade the lead tables in `DATABASE_URL` (idempotent; re-run after upgrading) |
+| `npm run db:setup` | Create or upgrade the lead, admin, activity and site-content tables in `DATABASE_URL` (idempotent; run before deploying an upgrade) |
 | `npm run admin:hash -- "password"` | Generate `ADMIN_PASSWORD_HASH` |
 
 ## Structure
@@ -40,8 +40,8 @@ lib/
   leads/             lead store: Postgres, or a JSON file in development
   email/             team notification, enquirer acknowledgement, provider (SMTP / console)
   auth/              admin session (jose JWT in an httpOnly cookie)
-proxy.ts             optimistic /admin gate (pages and actions re-check)
-db/schema.sql        lead + notes tables
+proxy.ts             optimistic /admin gate (pages, actions and route handlers re-check)
+db/schema.sql        leads (incl. pipeline fields), notes, admins, activity log, login failures, site content
 tests/, scripts/smoke.mjs, .github/workflows/ci.yml   unit tests, smoke test, CI
 vercel.json          runs server functions in Washington (iad1), next to the Neon database (us-east-1)
 ```
@@ -85,12 +85,15 @@ via `smtp.zoho.in:465`) and set `SMTP_FROM`. Add a DMARC record for the domain a
 `lib/contact/submit.ts`, which posts to `POST /api/leads` and returns a typed result. To move to another
 provider, change that one function; the form doesn't need to change.
 
-- Required: full name, college or institution, work or institutional email, phone, enquiry type
+- Required: organisation type (college or university, company, or other organisation), full name, the
+  organisation's name (its label follows the type: "College or university", "Company name" or "Organisation
+  name"), work or institutional email, phone, enquiry type
   (Campus Hackathon, National Hackathon, Industry Challenge, Sponsorship or Partnership, General Enquiry).
   Designation, city, participants, format, timeline and additional requirements are optional.
 - The form only shows success after the server confirms the enquiry was stored or emailed. Otherwise it keeps the
   visitor's details and offers the phone number and email instead.
 - `?type=<enquiry type>` or `?format=<format code>` on `/contact` pre-selects the enquiry type.
+  `?type=sponsorship` also pre-selects "Company" as the organisation type.
 - The schema still accepts the older optional fields (state, website, theme) and earlier enquiry types, so
   leads that are already stored keep displaying correctly in the admin.
 
@@ -132,18 +135,58 @@ to `app/layout.tsx`, and `track()` forwards to it. Add the provider's domains to
 
 ## Admin
 
-Set `SESSION_SECRET` (32+ chars) and `ADMIN_PASSWORD_HASH`, then sign in at `/admin/login`. Leads can be
-searched, filtered by status and event type, moved through the pipeline
-(New → Contacted → Meeting Scheduled → Proposal Sent → Negotiation → Won / Lost) and annotated with notes.
-Admin pages are `noindex` and disallowed in robots.txt.
+The admin lives at `/admin` (sign in at `/admin/login`). Admin pages are `noindex` and disallowed in robots.txt.
+
+### Signing in
+
+| Variable | |
+| --- | --- |
+| `SESSION_SECRET` | 32+ random characters (`openssl rand -base64 48`). Signs the session cookie. Changing it signs everyone out |
+| `ADMIN_USERNAME` | The primary admin's username (case-insensitive) |
+| `ADMIN_PASSWORD_HASH` | The primary admin's password, hashed with `npm run admin:hash -- "a long password"` |
+
+- **Primary admin:** `ADMIN_USERNAME` + the password behind `ADMIN_PASSWORD_HASH`. It can always sign in once all
+  three variables are set; it isn't a bootstrap mode that switches off later. Its password is changed on the server
+  (a new hash), not in the admin. `ADMIN_PASSWORD` (plain text) still works as a fallback for the hash, but don't use
+  it in production. `ADMIN_ALLOW_OWNER_LOGIN` is no longer read and can be removed.
+- **Additional admins:** named accounts created under Team sign in with their **email** in the Username field and
+  their own password. They get a temporary password once and change it under Account.
+- Sign-in shows one generic error ("That username and password don't match.") whatever was wrong, and keeps the
+  typed username. After 10 failed attempts from one IP in 15 minutes, sign-in is refused for the rest of that window
+  (counted per server instance and in the database); a successful sign-in clears the count.
+- Sessions last 8 hours. Every admin page, server action and route handler re-checks the session on the server
+  (`requireAdmin()`), not only `proxy.ts`. A session ends on its next request when its account is disabled or removed,
+  when its password is changed or reset (other sessions of that account; changing your own keeps the current one),
+  or, for the primary admin, when `ADMIN_USERNAME` or `ADMIN_PASSWORD_HASH` changes.
+- Without a primary admin configured, the last active named account can't be disabled, so there is always a way in.
+
+### Leads
+
+Leads can be searched, filtered (status, enquiry and organisation type, dates, organisation, failed notifications,
+open, follow-ups due) and sorted, moved through the pipeline
+(New → Contacted → Meeting Scheduled → Proposal Sent → Negotiation → Won / Lost) with a next follow-up date, last
+contacted date, meeting time, proposal details and loss reason, and annotated with notes. Follow-up and contact dates
+are days in Asia/Kolkata.
 
 - **Privacy requests:** each lead's contact details can be edited (correction) or the lead deleted permanently,
-  together with its notes.
+  together with its notes. The activity log keeps who changed what, with the institution's name, after a deletion.
 - **Failed notifications:** leads whose team email failed show an "Email failed" badge, and the dashboard warns
   about them. It also warns when no email provider is configured.
 - **Deep links:** the "Open in admin" link in a notification email opens that lead after you sign in, because
-  login returns you to the page you asked for.
-- After upgrading, run `npm run db:setup` once against production to add the `notify_status` column.
+  login returns you to the page you asked for (otherwise it opens `/admin`).
+
+### Deploying an upgrade
+
+Run `npm run db:setup` against the production database **before** deploying a version that adds columns or tables,
+for example with `DATABASE_URL` set in your shell for that one command. It only adds what's missing
+(`create … if not exists`, `add column if not exists`) and never drops data, so it's safe to re-run. This version adds
+the lead pipeline columns (`next_follow_up`, `last_contacted`, `meeting_at`, `proposal_details`, `loss_reason`), an
+activity index, and the `site_content` and `site_content_revisions` tables; earlier versions added `notify_status`,
+`org_type`, and the `admins`, `admin_activity` and `login_failures` tables. If the code is deployed first, new leads
+are still stored, but admin pages that use the new columns fail until the command has run.
+
+Then set `ADMIN_USERNAME` next to the existing `ADMIN_PASSWORD_HASH` and `SESSION_SECRET` in the host's environment
+(the primary admin can't sign in without it) and redeploy. Sessions from before this version are signed out once.
 
 ## Editing content
 

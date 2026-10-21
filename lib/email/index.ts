@@ -1,4 +1,5 @@
 import "server-only";
+import { getNotificationAddress } from "@/lib/cms";
 import { site } from "@/lib/site";
 
 export type Email = {
@@ -53,5 +54,9 @@ export async function getMailer(): Promise<Mailer | null> {
   return null;
 }
 
-/** Where lead notifications go. Defaults to the public company inbox. */
-export const notificationAddress = () => process.env.CONTACT_EMAIL || site.email;
+/**
+ * Where lead notifications go: the published contact-form recipient, else
+ * CONTACT_EMAIL, else the published company email. Published content only,
+ * never an admin's unpublished preview.
+ */
+export const notificationAddress = (): Promise<string> => getNotificationAddress();

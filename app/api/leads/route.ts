@@ -1,5 +1,6 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 import { safePath } from "@/lib/attribution";
+import { getContactInfo, getFormConfig } from "@/lib/cms";
 import { getMailer, notificationAddress, type Mailer } from "@/lib/email";
 import { leadAcknowledgement } from "@/lib/email/lead-acknowledgement";
 import { leadNotification } from "@/lib/email/lead-notification";
@@ -75,6 +76,12 @@ export async function POST(req: NextRequest) {
 }
 
 async function accept(req: NextRequest, mode: Mode, contentType: string): Promise<Outcome> {
+  // Published settings only, so an admin's unpublished preview can't change what is accepted.
+  const form = await getFormConfig({ published: true });
+  if (!form.enabled) {
+    return failure(503, "Our enquiry form isn't taking new enquiries at the moment. Please call or email us instead.");
+  }
+
   const ip = clientIp(req.headers);
   const limited = rateLimit(`lead:${ip}`, PER_IP_WINDOW.limit, PER_IP_WINDOW.ms);
   if (!limited.ok) {
@@ -118,6 +125,11 @@ async function accept(req: NextRequest, mode: Mode, contentType: string): Promis
     return failure(422, "Some details need another look.", { fields: fieldErrors(parsed.error.issues) });
   }
   const lead = parsed.data;
+  // New enquiries must use a type the form currently offers. The schema also accepts older
+  // types, which stay valid for leads that are already stored.
+  if (!form.enquiryTypes.some((t) => t.value === lead.eventType)) {
+    return failure(422, "Some details need another look.", { fields: { eventType: "Choose what your enquiry is about." } });
+  }
   const ipHash = hashIp(ip);
   const source = mode === "json" ? jsonSource(body.source) : formSource(req);
 
@@ -140,7 +152,10 @@ async function accept(req: NextRequest, mode: Mode, contentType: string): Promis
     }
   }
 
-  const notification = mailer ? leadNotification(lead, { to: notificationAddress(), id: saved?.id, source }) : null;
+  // Resolved now, inside the request: published content only.
+  const [recipient, contact] = mailer ? await Promise.all([notificationAddress(), getContactInfo({ published: true })]) : [null, null];
+  const ack: AckOptions | null = recipient && contact ? { contact, replyTo: recipient } : null;
+  const notification = mailer && recipient ? leadNotification(lead, { to: recipient, id: saved?.id, source }) : null;
 
   if (store && saved) {
     // Stored safely — email the team without making the visitor wait, then record whether it went.
@@ -159,7 +174,7 @@ async function accept(req: NextRequest, mode: Mode, contentType: string): Promis
         } catch (err) {
           console.error("[leads] Couldn't record notification status", err);
         }
-        await acknowledge(mailer, lead);
+        if (ack) await acknowledge(mailer, lead, ack);
       });
     }
     return { ok: true, status: 201 };
@@ -169,7 +184,7 @@ async function accept(req: NextRequest, mode: Mode, contentType: string): Promis
   if (mailer && notification) {
     try {
       await mailer.send(notification);
-      after(() => acknowledge(mailer, lead));
+      after(() => (ack ? acknowledge(mailer, lead, ack) : undefined));
       return { ok: true, status: 201 };
     } catch (err) {
       console.error("[leads] Notification email failed (lead not stored)", err);
@@ -180,15 +195,17 @@ async function accept(req: NextRequest, mode: Mode, contentType: string): Promis
 
 const ACK_PER_RECIPIENT = { limit: 1, ms: 24 * 60 * 60_000 };
 
+type AckOptions = Parameters<typeof leadAcknowledgement>[1];
+
 /**
  * Confirmation to the enquirer. Best-effort: it never affects the response.
  * Capped per recipient address (not just per IP), so the form can't be used to
  * send repeated mail to someone else's inbox from rotating IPs.
  */
-async function acknowledge(mailer: Mailer, lead: LeadData) {
+async function acknowledge(mailer: Mailer, lead: LeadData, opts: AckOptions) {
   if (!rateLimit(`ack:${lead.email.toLowerCase()}`, ACK_PER_RECIPIENT.limit, ACK_PER_RECIPIENT.ms).ok) return;
   try {
-    await mailer.send(leadAcknowledgement(lead));
+    await mailer.send(leadAcknowledgement(lead, opts));
   } catch (err) {
     console.error("[leads] Acknowledgement email failed", err);
   }

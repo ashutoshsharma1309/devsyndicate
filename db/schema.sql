@@ -1,5 +1,6 @@
--- Dev Syndicate lead storage and admin accounts. Apply with `npm run db:setup` (idempotent;
--- only "create … if not exists" / "add column if not exists", so re-running never drops data).
+-- Dev Syndicate lead storage, admin accounts and site content. Apply with `npm run db:setup`
+-- (idempotent; only "create … if not exists" / "add column if not exists", so re-running never
+-- drops data). Run it before deploying a version that adds columns or tables.
 
 create extension if not exists pgcrypto;
 
@@ -53,7 +54,18 @@ alter table leads add column if not exists notify_status text
 alter table leads add column if not exists org_type text not null default '';
 create index if not exists leads_org_type_idx on leads (org_type);
 
--- Named admin accounts. Until one exists, the shared ADMIN_PASSWORD_HASH signs in.
+-- Pipeline tracking: follow-up and contact days (Asia/Kolkata), the meeting time, proposal
+-- details and why a lead was lost.
+alter table leads add column if not exists next_follow_up date;
+alter table leads add column if not exists last_contacted date;
+alter table leads add column if not exists meeting_at timestamptz;
+alter table leads add column if not exists proposal_details text not null default '';
+alter table leads add column if not exists loss_reason text not null default '';
+create index if not exists leads_next_follow_up_idx on leads (next_follow_up) where next_follow_up is not null;
+create index if not exists leads_updated_at_idx on leads (updated_at desc);
+
+-- Additional named admin accounts (email + password). The primary admin signs in with
+-- ADMIN_USERNAME + ADMIN_PASSWORD_HASH from the environment and has no row here.
 create table if not exists admins (
   id             uuid primary key default gen_random_uuid(),
   email          text not null unique,   -- stored lowercase
@@ -78,6 +90,7 @@ create table if not exists admin_activity (
 
 create index if not exists admin_activity_at_idx on admin_activity (at desc);
 create index if not exists admin_activity_lead_idx on admin_activity (lead_id, at desc);
+create index if not exists admin_activity_action_idx on admin_activity (action, at desc);
 
 -- Failed sign-ins per hashed IP, for lockout across server instances. Pruned after a day.
 create table if not exists login_failures (
@@ -86,3 +99,25 @@ create table if not exists login_failures (
 );
 
 create index if not exists login_failures_key_idx on login_failures (key, at);
+
+-- Editable website content: one row per section, with an unpublished draft and the live version.
+create table if not exists site_content (
+  section         text primary key,
+  draft           jsonb null,
+  published       jsonb null,
+  draft_saved_at  timestamptz null,
+  draft_saved_by  text null,
+  published_at    timestamptz null,
+  published_by    text null
+);
+
+-- Every publish, for reverting. The app keeps the last 20 per section.
+create table if not exists site_content_revisions (
+  id            uuid primary key default gen_random_uuid(),
+  section       text,
+  content       jsonb,
+  published_at  timestamptz default now(),
+  published_by  text
+);
+
+create index if not exists site_content_revisions_section_idx on site_content_revisions (section, published_at desc);

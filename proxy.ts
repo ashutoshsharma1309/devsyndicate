@@ -8,10 +8,13 @@ import { safeAdminPath, SESSION_COOKIE, SESSION_ENDED_PARAM, verifySessionToken 
 export async function proxy(req: NextRequest) {
   const { pathname, search, searchParams } = req.nextUrl;
 
+  // Leaving a draft preview must work even when signed out (see the route's comment).
+  if (pathname === "/admin/content/preview/exit") return withNoIndex(NextResponse.next());
+
   if (pathname === "/admin/login" && searchParams.has(SESSION_ENDED_PARAM) && req.method === "GET") {
-    // requireAdmin() sends a disabled or removed account here. Its token is still
-    // signed, so clear it instead of bouncing back into the panel. GET only: the
-    // sign-in action posts to this same URL and sets a fresh cookie.
+    // requireAdmin() sends a disabled or removed account, or a session whose password has
+    // changed, here. Its token is still signed, so clear it instead of bouncing back into the
+    // panel. GET only: the sign-in action posts to this same URL and sets a fresh cookie.
     const res = withNoIndex(NextResponse.next());
     res.cookies.delete({ name: SESSION_COOKIE, path: "/admin" });
     return res;
@@ -21,7 +24,7 @@ export async function proxy(req: NextRequest) {
 
   if (pathname === "/admin/login") {
     if (!authed) return withNoIndex(NextResponse.next());
-    const next = safeAdminPath(searchParams.get("next")) ?? "/admin/leads";
+    const next = safeAdminPath(searchParams.get("next")) ?? "/admin";
     return NextResponse.redirect(new URL(next, req.url));
   }
   if (!authed) {

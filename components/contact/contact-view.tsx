@@ -1,9 +1,9 @@
 import { Suspense } from "react";
 import { ContactOptions } from "@/components/contact/contact-options";
-import { LeadForm, LeadFormWithPreset, Received } from "@/components/contact/lead-form";
+import { LeadForm, LeadFormWithPreset, Received, type LeadFormSettings } from "@/components/contact/lead-form";
 import { PageHero } from "@/components/layout/page-hero";
 import { Container } from "@/components/ui/section";
-import { site } from "@/lib/site";
+import { getContactInfo, getFormConfig, type ContactInfo } from "@/lib/cms";
 
 /** Result of a plain (no-JavaScript) form post — see app/api/leads/route.ts. */
 export const outcomes = ["sent", "invalid", "error"] as const;
@@ -15,12 +15,48 @@ const next = [
   { title: "A clear proposal", body: "Format, timeline, scope and who handles what — in writing." },
 ];
 
+const inlineLink = "underline decoration-ink/25 underline-offset-4 hover:decoration-signal";
+
+/** Shown instead of the form while the published contact-form settings have it switched off. */
+function FormClosed({ contact }: { contact: ContactInfo }) {
+  const pc = contact.primaryContact;
+  return (
+    <div role="note" className="rounded-md border border-line bg-white p-7 md:p-10">
+      <p className="t-label text-mute">Form closed</p>
+      <p className="mt-4 text-[1.125rem] font-medium tracking-[-0.015em]">
+        We&apos;re not taking enquiries through this form at the moment.
+      </p>
+      <p className="t-body mt-3 max-w-xl text-mute">
+        Please reach us directly: call {pc.name} on{" "}
+        <a href={pc.phone.href} className={`text-ink ${inlineLink}`}>
+          {pc.phone.display}
+        </a>{" "}
+        or email{" "}
+        <a href={`mailto:${contact.email}`} className={`break-all text-ink ${inlineLink}`}>
+          {contact.email}
+        </a>
+        .
+      </p>
+    </div>
+  );
+}
+
 /**
  * The /contact page body. `outcome` is set only on the /contact/[outcome]
  * pages, where a plain form post (no JavaScript) lands, so the result is in the
  * server-rendered HTML rather than depending on client code.
+ *
+ * Contact details, the offered enquiry types, the confirmation message and
+ * whether the form is open come from published content.
  */
-export function ContactView({ outcome, children }: { outcome?: Outcome; children?: React.ReactNode }) {
+export async function ContactView({ outcome, children }: { outcome?: Outcome; children?: React.ReactNode }) {
+  const [form, contact] = await Promise.all([getFormConfig(), getContactInfo()]);
+  const settings: LeadFormSettings = {
+    enquiryTypes: form.enquiryTypes,
+    confirmationMessage: form.confirmationMessage,
+    privacyHref: form.privacyHref,
+    contact: { name: contact.primaryContact.name, email: contact.email, phone: contact.primaryContact.phone },
+  };
   return (
     <>
       {children}
@@ -28,7 +64,7 @@ export function ContactView({ outcome, children }: { outcome?: Outcome; children
         eyebrow="Contact"
         title="Let's plan your college hackathon."
         lead="Tell us about your college, company or organisation and what you have in mind. The Dev Syndicate team can discuss your requirements and the right format for your event."
-        below={<ContactOptions tone="dark" formHref="#enquiry" />}
+        below={<ContactOptions tone="dark" formHref={form.enabled ? "#enquiry" : null} />}
       />
 
       <section id="enquiry" aria-labelledby="enquiry-title" className="scroll-mt-16 bg-paper">
@@ -39,13 +75,15 @@ export function ContactView({ outcome, children }: { outcome?: Outcome; children
               Tell us what you&apos;re planning.
             </h2>
             {outcome === "sent" ? (
-              <Received />
+              <Received settings={settings} />
+            ) : !form.enabled ? (
+              <FormClosed contact={contact} />
             ) : outcome ? (
-              <LeadForm notice={outcome} />
+              <LeadForm settings={settings} notice={outcome} />
             ) : (
               // The fallback is the full form, so it is in the static HTML; the preset applies once hydrated.
-              <Suspense fallback={<LeadForm />}>
-                <LeadFormWithPreset />
+              <Suspense fallback={<LeadForm settings={settings} />}>
+                <LeadFormWithPreset settings={settings} />
               </Suspense>
             )}
           </div>
@@ -71,20 +109,20 @@ export function ContactView({ outcome, children }: { outcome?: Outcome; children
                 <div>
                   <dt className="t-label text-mute">Prefer to talk first?</dt>
                   <dd className="mt-1.5">
-                    Call {site.primaryContact.name} on{" "}
+                    Call {contact.primaryContact.name} on{" "}
                     <a
-                      href={site.primaryContact.phone.href}
+                      href={contact.primaryContact.phone.href}
                       className="underline decoration-ink/25 underline-offset-4 hover:decoration-signal"
                     >
-                      {site.primaryContact.phone.display}
+                      {contact.primaryContact.phone.display}
                     </a>
                   </dd>
                 </div>
                 <div>
                   <dt className="t-label text-mute">Based in</dt>
                   <dd className="mt-1.5">
-                    {site.location.city}, {site.location.region} — working with institutions across{" "}
-                    {site.location.country}
+                    {contact.location.city}, {contact.location.region} — working with institutions across{" "}
+                    {contact.location.country}
                   </dd>
                 </div>
               </dl>

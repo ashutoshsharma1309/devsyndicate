@@ -1,18 +1,21 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalPage } from "@/components/layout/legal";
 import { PageJsonLd } from "@/components/layout/json-ld";
-import { pageMetadata, type PageSeo } from "@/lib/seo";
+import { getContactInfo } from "@/lib/cms";
+import { cmsPageSeo, pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
 
-const page: PageSeo = {
-  title: "Terms and Conditions",
-  description: "The terms that apply when you use the Dev Syndicate website.",
-  path: "/terms",
-};
+const seo = () => cmsPageSeo("/terms");
 
-export const metadata = pageMetadata(page);
+export async function generateMetadata(): Promise<Metadata> {
+  return pageMetadata(await seo());
+}
 
-export default function TermsPage() {
+export default async function TermsPage() {
+  const [page, contact] = await Promise.all([seo(), getContactInfo()]);
+  // The company line, unless it is hidden in the published contact details; then the primary contact's.
+  const phone = contact.showCompanyPhone ? contact.phone : contact.primaryContact.phone;
   return (
     <>
       <PageJsonLd page={page} />
@@ -26,8 +29,8 @@ export default function TermsPage() {
           title: "About these terms",
           body: (
             <p>
-              This website is operated by {site.name}, based in {site.location.city}, {site.location.region},{" "}
-              {site.location.country}. &ldquo;We&rdquo;, &ldquo;us&rdquo; and &ldquo;our&rdquo; refer to {site.name}.
+              This website is operated by {site.name}, based in {contact.location.city}, {contact.location.region},{" "}
+              {contact.location.country}. &ldquo;We&rdquo;, &ldquo;us&rdquo; and &ldquo;our&rdquo; refer to {site.name}.
             </p>
           ),
         },
@@ -120,7 +123,7 @@ export default function TermsPage() {
           body: (
             <p>
               These terms are governed by the laws of India. Any dispute relating to them is subject to the
-              jurisdiction of the courts at {site.location.city}, {site.location.region}.
+              jurisdiction of the courts at {contact.location.city}, {contact.location.region}.
             </p>
           ),
         },
@@ -130,7 +133,7 @@ export default function TermsPage() {
           body: (
             <p>
               We may update these terms from time to time; the date at the top shows the latest version. Questions?
-              Email <a href={`mailto:${site.email}`}>{site.email}</a> or call {site.phone.display}.
+              Email <a href={`mailto:${contact.email}`}>{contact.email}</a> or call {phone.display}.
             </p>
           ),
         },

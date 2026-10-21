@@ -2,28 +2,33 @@ import { ArrowRight, ArrowUpRight, Mail, Phone } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { LinkedInIcon } from "@/components/ui/linkedin-icon";
+import { getContactInfo } from "@/lib/cms";
 import { site } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 type Tone = "light" | "dark";
 
+type Option = { label: string; value: ReactNode; note: string; href: string; icon: ReactNode; external?: boolean };
+
 /**
- * The four ways to reach Dev Syndicate, side by side: call, email, LinkedIn
- * and the enquiry form. Every option is a real link (tel:, mailto:, profile, form).
+ * The ways to reach Dev Syndicate, side by side: call, email, LinkedIn (unless
+ * hidden in the published contact details) and the enquiry form (unless it is
+ * closed: `formHref` null). Every option is a real link (tel:, mailto:, profile, form).
  */
-export function ContactOptions({
+export async function ContactOptions({
   tone = "light",
   formHref = "/contact#enquiry",
   className,
 }: {
   tone?: Tone;
-  /** Where "Send an enquiry" points: the form section on /contact, or the page itself. */
-  formHref?: string;
+  /** Where "Send an enquiry" points: the form section on /contact, or the page itself. null = no form option. */
+  formHref?: string | null;
   className?: string;
 }) {
-  const contact = site.primaryContact;
+  const info = await getContactInfo();
+  const contact = info.primaryContact;
   const dark = tone === "dark";
-  const options: { label: string; value: ReactNode; note: string; href: string; icon: ReactNode; external?: boolean }[] = [
+  const all: (Option | false)[] = [
     {
       label: `Call ${contact.name}`,
       value: contact.phone.display,
@@ -33,12 +38,12 @@ export function ContactOptions({
     },
     {
       label: "Email the team",
-      value: site.email,
+      value: info.email,
       note: "We reply from this address",
-      href: `mailto:${site.email}`,
+      href: `mailto:${info.email}`,
       icon: <Mail strokeWidth={1.6} className="size-4" />,
     },
-    {
+    info.showPrimaryContactLinkedin && {
       label: "Connect on LinkedIn",
       value: contact.name,
       note: `${contact.role}, ${site.name}`,
@@ -46,7 +51,7 @@ export function ContactOptions({
       icon: <LinkedInIcon className="size-3.5" />,
       external: true,
     },
-    {
+    formHref !== null && {
       label: "Send an enquiry",
       value: "Collaboration form",
       note: "Takes about two minutes",
@@ -54,12 +59,14 @@ export function ContactOptions({
       icon: <ArrowRight strokeWidth={1.6} className="size-4" />,
     },
   ];
+  const options = all.filter((o): o is Option => o !== false);
 
   return (
     <ul
       data-track-placement="contact-options"
       className={cn(
-        "grid gap-px overflow-hidden rounded-md border sm:grid-cols-2 lg:grid-cols-4",
+        "grid gap-px overflow-hidden rounded-md border sm:grid-cols-2",
+        options.length === 4 ? "lg:grid-cols-4" : options.length === 3 ? "lg:grid-cols-3" : "lg:grid-cols-2",
         dark ? "border-white/[0.09] bg-white/[0.09]" : "border-line bg-line",
         className,
       )}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { Footer } from "@/components/footer/footer";
+import { FooterView, staticFooterData } from "@/components/footer/footer-view";
 import { Navbar } from "@/components/navigation/navbar";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { site } from "@/lib/site";
@@ -10,6 +10,8 @@ import { site } from "@/lib/site";
  * Root error boundary. It replaces the (site) layout, so it brings its own
  * navbar and footer, like app/not-found.tsx. Always offers a direct way to
  * reach us, since a visitor who hits this may have been mid-enquiry.
+ * A client component can't read published content, so it shows the site's
+ * built-in contact details (lib/site.ts).
  */
 export default function ErrorPage({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   useEffect(() => {
@@ -50,7 +52,7 @@ export default function ErrorPage({ error, retry }: { error: Error & { digest?: 
           {error.digest && <p className="mt-10 font-mono text-[0.8125rem] text-mute-dark">Reference: {error.digest}</p>}
         </div>
       </main>
-      <Footer />
+      <FooterView data={staticFooterData} />
     </>
   );
 }

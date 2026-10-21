@@ -1,22 +1,21 @@
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
 import { CountUp } from "@/components/ui/count-up";
+import { getHomepage } from "@/lib/cms";
 import { expectations, outcomeMetrics } from "@/lib/content";
 
-export function OutcomesSection() {
+export async function OutcomesSection() {
+  const intro = (await getHomepage()).sections.outcomes;
   return (
     <Section aria-labelledby="outcomes-title">
       <Container>
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">
-            <SectionLabel>Outcomes</SectionLabel>
+            <SectionLabel>{intro.label}</SectionLabel>
             <SectionHeading id="outcomes-title" className="mt-6">
-              Built around measurable outcomes.
+              {intro.heading}
             </SectionHeading>
           </div>
-          <p className="t-lead text-mute lg:col-span-5">
-            Every hackathon ends with a report your institution can use. These are the numbers it covers — counted,
-            not estimated.
-          </p>
+          <p className="t-lead text-mute lg:col-span-5">{intro.description}</p>
         </div>
 
         <ul className="mt-14 grid gap-px overflow-hidden rounded-md border border-line bg-line sm:grid-cols-2 md:mt-20 lg:grid-cols-4">
@@ -55,15 +54,18 @@ export function OutcomesSection() {
   );
 }
 
-export function ExpectationsSection() {
+export async function ExpectationsSection() {
+  const intro = (await getHomepage()).sections.expectations;
   return (
     <Section tone="muted" aria-labelledby="expect-title">
       <Container>
         <div className="max-w-3xl">
-          <SectionLabel>Working with us</SectionLabel>
+          <SectionLabel>{intro.label}</SectionLabel>
           <SectionHeading id="expect-title" className="mt-6">
-            What institutions can expect.
+            {intro.heading}
           </SectionHeading>
+          {/* No paragraph by default; shown once one is published. */}
+          {intro.description && <p className="t-lead mt-6 max-w-2xl text-mute">{intro.description}</p>}
         </div>
         <ol className="mt-14 grid gap-10 sm:grid-cols-2 md:mt-20 lg:grid-cols-5 lg:gap-8">
           {expectations.map((e, i) => (

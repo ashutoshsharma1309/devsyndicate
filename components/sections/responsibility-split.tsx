@@ -1,4 +1,5 @@
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
+import { getHomepage } from "@/lib/cms";
 import { responsibilities } from "@/lib/content";
 
 function Tick({ className }: { className?: string }) {
@@ -9,18 +10,17 @@ function Tick({ className }: { className?: string }) {
   );
 }
 
-export function ResponsibilitySplit() {
+export async function ResponsibilitySplit() {
+  const intro = (await getHomepage()).sections.responsibilities;
   return (
     <Section tone="muted" aria-labelledby="split-title">
       <Container>
         <div className="max-w-3xl">
-          <SectionLabel>Who does what</SectionLabel>
+          <SectionLabel>{intro.label}</SectionLabel>
           <SectionHeading id="split-title" className="mt-6">
-            You bring the campus. We handle the execution.
+            {intro.heading}
           </SectionHeading>
-          <p className="t-lead mt-6 max-w-2xl text-mute">
-            The division of work is agreed up front, so nobody on your side is surprised by what lands on their desk.
-          </p>
+          <p className="t-lead mt-6 max-w-2xl text-mute">{intro.description}</p>
         </div>
 
         <div className="mt-14 grid overflow-hidden rounded-md border border-line md:mt-20 md:grid-cols-[5fr_7fr]">

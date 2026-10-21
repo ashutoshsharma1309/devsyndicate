@@ -18,7 +18,12 @@ const STEP_MS = 3600;
  * resume it). Never runs with reduced motion or while animation is paused
  * site-wide (components/ui/motion-toggle.tsx).
  */
-export function ExperienceSection() {
+export function ExperienceSection({
+  intro,
+}: {
+  /** The section's label, heading and paragraph, from the published homepage content (passed by the page). */
+  intro: { label: string; heading: string; description: string };
+}) {
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
   const [userPaused, setUserPaused] = useState(false);
@@ -78,14 +83,11 @@ export function ExperienceSection() {
       <Container>
         <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-5">
-            <SectionLabel tone="dark">The experience</SectionLabel>
+            <SectionLabel tone="dark">{intro.label}</SectionLabel>
             <SectionHeading id="experience-title" className="mt-6">
-              Built for the people doing the building.
+              {intro.heading}
             </SectionHeading>
-            <p className="t-lead mt-6 max-w-md text-white/70">
-              Students remember how an event felt to take part in. We design every step of the participant journey
-              — from the first time they hear about it to the certificate in their inbox.
-            </p>
+            <p className="t-lead mt-6 max-w-md text-white/70">{intro.description}</p>
             <dl className="mt-10 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-white/[0.08] bg-white/[0.08] text-sm">
               {[
                 ["One event page", "Everything participants need, in one place."],

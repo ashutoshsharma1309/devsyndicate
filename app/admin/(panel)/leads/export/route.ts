@@ -20,6 +20,7 @@ const columns: [header: string, value: (l: Lead) => string][] = [
   ["Institution", (l) => l.institution],
   ["City", (l) => l.city],
   ["State", (l) => l.state],
+  ["Website", (l) => l.website ?? ""],
   ["Contact name", (l) => l.name],
   ["Designation", (l) => l.designation],
   ["Email", (l) => l.email],
@@ -28,8 +29,16 @@ const columns: [header: string, value: (l: Lead) => string][] = [
   ["Participants", (l) => opt(participantRanges, l.participants)],
   ["Format", (l) => opt(eventFormats, l.format)],
   ["Timeline", (l) => opt(timelines, l.timeline)],
+  ["Theme / technology", (l) => l.theme ?? ""],
   ["Message", (l) => l.message],
   ["Source", (l) => l.source ?? ""],
+  ["Team notification", (l) => (l.notifyStatus === "sent" ? "Sent" : l.notifyStatus === "failed" ? "Failed" : "")],
+  ["Last updated", (l) => ist(l.updatedAt).slice(0, 16).replace("T", " ")],
+  ["Next follow-up", (l) => l.nextFollowUp ?? ""],
+  ["Last contacted", (l) => l.lastContacted ?? ""],
+  ["Meeting (IST)", (l) => (l.meetingAt ? ist(l.meetingAt).slice(0, 16).replace("T", " ") : "")],
+  ["Proposal details", (l) => l.proposalDetails],
+  ["Loss reason", (l) => l.lossReason],
 ];
 
 /**

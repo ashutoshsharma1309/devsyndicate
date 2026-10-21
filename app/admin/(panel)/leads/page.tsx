@@ -1,12 +1,14 @@
 import Link from "next/link";
+import { ChevronLeft, ChevronRight, Download, Inbox, TriangleAlert } from "lucide-react";
 import { FlashToast } from "@/components/admin/forms";
 import { hasLeadFilters, LeadFilterBar, leadFilterQuery, readLeadFilters } from "@/components/admin/lead-filters";
-import { NotifyFailedBadge, OrgTypeBadge, StatusBadge } from "@/components/admin/status-badge";
+import { istTodayLocal } from "@/components/admin/lead-format";
+import { LeadList } from "@/components/admin/lead-list";
+import { AdminPageHeader } from "@/components/admin/shell/page-header";
 import { requireAdmin } from "@/lib/auth/admin";
 import { getLeadStore } from "@/lib/leads/store";
-import { DEFAULT_PAGE_SIZE, type LeadPage } from "@/lib/leads/types";
-import { cn, formatDate, formatLocation } from "@/lib/utils";
-import { allEventTypes, eventFormats, labelFor, participantRanges } from "@/lib/validation/lead";
+import { DEFAULT_PAGE_SIZE, MAX_PAGE, type LeadPage } from "@/lib/leads/types";
+import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Leads" };
 
@@ -15,15 +17,22 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
   const sp = await searchParams;
   const { values, filters } = readLeadFilters(sp);
   const filtered = hasLeadFilters(values);
-  const requested = Number.parseInt(String(sp.page ?? "1"), 10);
+  const rawPage = Number.parseInt(String((Array.isArray(sp.page) ? sp.page[0] : sp.page) ?? "1"), 10);
+  const requested = Number.isFinite(rawPage) ? Math.min(MAX_PAGE, Math.max(1, rawPage)) : 1;
 
   const store = await getLeadStore();
   let result: LeadPage = { leads: [], total: 0, page: 1, pageSize: DEFAULT_PAGE_SIZE };
+  let failed = false;
   if (store) {
-    result = await store.list({ ...filters, page: requested });
-    // A page past the end (bookmarked, or leads deleted since) shows the last page rather than nothing.
-    if (result.leads.length === 0 && result.total > 0) {
-      result = await store.list({ ...filters, page: Math.ceil(result.total / result.pageSize) });
+    try {
+      result = await store.list({ ...filters, page: requested });
+      // A page past the end (bookmarked, or leads deleted since) shows the last page rather than nothing.
+      if (result.leads.length === 0 && result.total > 0) {
+        result = await store.list({ ...filters, page: Math.ceil(result.total / result.pageSize) });
+      }
+    } catch (err) {
+      failed = true;
+      console.error("[admin] Couldn't list leads:", (err as { code?: string })?.code ?? "unknown error");
     }
   }
   const { leads, total, page, pageSize } = result;
@@ -32,26 +41,31 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
   const lastShown = (page - 1) * pageSize + leads.length;
   // Set by the deleteLead action's redirect.
   const deleted = sp.deleted === "1";
+  // On the organisations link the key is normalised; show a real spelling when there is one.
+  const orgLabel = values.org ? leads[0]?.institution : undefined;
 
   return (
     <div>
       {deleted && <FlashToast message="Lead and its notes deleted." param="deleted" />}
-      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-3">
-        <h1 className="text-3xl font-medium tracking-[-0.035em]">Leads</h1>
-        <div className="flex flex-wrap items-baseline gap-x-5 gap-y-2">
-          <p className="text-sm tabular-nums text-mute" aria-live="polite">
-            {total} {total === 1 ? "request" : "requests"}
-            {filtered && (total === 1 ? " matches these filters" : " match these filters")}
-          </p>
-          {total > 0 && (
+      <AdminPageHeader
+        title="Leads"
+        description="Enquiries from the contact form. Search, filter and open a lead to work on it."
+        meta={
+          failed ? undefined : (
+            <span className="tabular-nums">
+              {total} {total === 1 ? "request" : "requests"}
+              {filtered && (total === 1 ? " matches these filters" : " match these filters")}
+            </span>
+          )
+        }
+        actions={
+          total > 0 && (
             // A plain link: the browser downloads it, and the export re-checks the session itself.
             <a
               href={`/admin/leads/export${leadFilterQuery(values)}`}
-              className="inline-flex items-center gap-1.5 rounded-sm border border-line bg-white px-3 py-1.5 text-sm hover:border-ink/30"
+              className="inline-flex h-10 items-center gap-2 rounded-sm border border-ink/15 bg-white px-3.5 text-sm font-medium transition-colors duration-150 hover:border-ink/40"
             >
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" />
-              </svg>
+              <Download aria-hidden="true" className="size-4" />
               Export CSV
               <span className="sr-only">
                 {" "}
@@ -59,79 +73,51 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
                 {filtered ? ", current filters" : ""})
               </span>
             </a>
-          )}
+          )
+        }
+      />
+
+      {/* Keyed on the filters: a client-side navigation that only changes the query string (a dashboard
+          tile, "Clear all", the sidebar link) keeps this component mounted, and uncontrolled selects
+          ignore new defaultValues — remounting resets every control to the current filters. */}
+      <LeadFilterBar key={leadFilterQuery(values)} values={values} orgLabel={orgLabel} />
+
+      {failed ? (
+        <div role="alert" className="mt-6 rounded-md border border-danger/25 bg-white p-6 text-sm sm:p-8">
+          <p className="flex items-center gap-2 font-medium text-danger">
+            <TriangleAlert aria-hidden="true" className="size-4" />
+            The leads couldn&apos;t be loaded
+          </p>
+          <p className="mt-2 text-mute">
+            The lead database didn&apos;t respond. This is usually temporary. Nothing has been changed.
+          </p>
+          <Link
+            href={`/admin/leads${leadFilterQuery(values, page)}`}
+            className="mt-4 inline-flex h-10 items-center rounded-sm border border-ink/15 px-3.5 font-medium hover:border-ink/40"
+          >
+            Try again
+          </Link>
         </div>
-      </div>
-
-      <LeadFilterBar values={values} />
-
-      {leads.length === 0 ? (
-        <p className="mt-8 rounded-md border border-dashed border-line p-10 text-center text-sm text-mute">
+      ) : !store ? (
+        <EmptyState>Lead storage isn&apos;t configured, so there are no leads to show.</EmptyState>
+      ) : leads.length === 0 ? (
+        <EmptyState>
           {filtered ? (
             <>
               No leads match these filters.{" "}
-              <Link href="/admin/leads" className="text-signal hover:underline">
+              <Link href="/admin/leads" className="font-medium text-signal underline-offset-4 hover:underline">
                 Clear filters
               </Link>
             </>
           ) : (
             "No requests yet. New submissions from the contact form appear here."
           )}
-        </p>
+        </EmptyState>
       ) : (
-        <div className="mt-8 overflow-x-auto rounded-md border border-line bg-white">
-          <table className="w-full min-w-[56rem] text-left text-sm">
-            <thead className="border-b border-line bg-paper/60">
-              <tr className="t-label text-mute">
-                <th scope="col" className="px-5 py-3 font-normal">Institution</th>
-                <th scope="col" className="px-5 py-3 font-normal">Contact</th>
-                <th scope="col" className="px-5 py-3 font-normal">Event</th>
-                <th scope="col" className="px-5 py-3 font-normal">Status</th>
-                <th scope="col" className="px-5 py-3 text-right font-normal">Received</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {leads.map((l) => (
-                <tr key={l.id} className="group relative hover:bg-paper/60">
-                  <td className="px-5 py-4 align-top">
-                    <Link
-                      href={`/admin/leads/${l.id}`}
-                      className="font-medium after:absolute after:inset-0 after:content-[''] group-hover:text-signal"
-                    >
-                      {l.institution}
-                    </Link>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-mute">
-                      <OrgTypeBadge orgType={l.orgType} />
-                      <span>{formatLocation(l)}</span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 align-top">
-                    <div>{l.name}</div>
-                    {l.designation && <div className="mt-0.5 text-mute">{l.designation}</div>}
-                  </td>
-                  <td className="px-5 py-4 align-top">
-                    <div>{labelFor(allEventTypes, l.eventType)}</div>
-                    <div className="mt-0.5 text-mute">
-                      {labelFor(participantRanges, l.participants)} · {labelFor(eventFormats, l.format)}
-                    </div>
-                  </td>
-                  <td className="px-5 py-4 align-top">
-                    <div className="flex flex-col items-start gap-1.5">
-                      <StatusBadge status={l.status} />
-                      {l.notifyStatus === "failed" && <NotifyFailedBadge />}
-                    </div>
-                  </td>
-                  <td className="whitespace-nowrap px-5 py-4 text-right align-top tabular-nums text-mute">
-                    {formatDate(l.createdAt)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <LeadList leads={leads} sort={values.sort || "newest"} today={istTodayLocal()} />
       )}
 
-      {total > 0 && (
+      {!failed && total > 0 && (
         <nav aria-label="Pages" className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
           <p className="tabular-nums text-mute">
             Showing {firstShown}–{lastShown} of {total}
@@ -139,13 +125,15 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
           {lastPage > 1 && (
             <div className="flex items-center gap-2">
               <PageLink href={page > 1 ? `/admin/leads${leadFilterQuery(values, page - 1)}` : null} rel="prev">
-                ← Previous
+                <ChevronLeft aria-hidden="true" className="size-4" />
+                Previous
               </PageLink>
               <span className="px-1 tabular-nums text-mute">
                 Page {page} of {lastPage}
               </span>
               <PageLink href={page < lastPage ? `/admin/leads${leadFilterQuery(values, page + 1)}` : null} rel="next">
-                Next →
+                Next
+                <ChevronRight aria-hidden="true" className="size-4" />
               </PageLink>
             </div>
           )}
@@ -155,9 +143,18 @@ export default async function LeadsPage({ searchParams }: PageProps<"/admin/lead
   );
 }
 
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="mt-6 flex flex-col items-center gap-3 rounded-md border border-dashed border-line px-6 py-12 text-center text-sm text-mute">
+      <Inbox aria-hidden="true" className="size-5" />
+      <p>{children}</p>
+    </div>
+  );
+}
+
 /** Prev/next link that keeps the filters; disabled (not a link) at either end. */
 function PageLink({ href, rel, children }: { href: string | null; rel: "prev" | "next"; children: React.ReactNode }) {
-  const cls = "inline-flex h-9 items-center rounded-sm border px-3";
+  const cls = "inline-flex h-9 items-center gap-1 rounded-sm border px-3";
   if (!href) {
     return (
       <span aria-disabled="true" className={cn(cls, "border-line text-mute/70")}>
@@ -166,7 +163,7 @@ function PageLink({ href, rel, children }: { href: string | null; rel: "prev" | 
     );
   }
   return (
-    <Link href={href} rel={rel} className={cn(cls, "border-line bg-white hover:border-ink/30")}>
+    <Link href={href} rel={rel} className={cn(cls, "border-line bg-white transition-colors duration-150 hover:border-ink/30")}>
       {children}
     </Link>
   );

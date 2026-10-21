@@ -2,22 +2,21 @@ import { ProcessSteps } from "@/components/process/process-steps";
 import { ButtonLink } from "@/components/ui/button";
 import { Magnetic } from "@/components/ui/magnetic";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
+import { getHomepage } from "@/lib/cms";
 
-export function HowItWorksSection() {
+export async function HowItWorksSection() {
+  const intro = (await getHomepage()).sections.howItWorks;
   return (
     <Section aria-labelledby="process-title">
       <Container>
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">
-            <SectionLabel>How it works</SectionLabel>
+            <SectionLabel>{intro.label}</SectionLabel>
             <SectionHeading id="process-title" className="mt-6">
-              From conversation to hackathon.
+              {intro.heading}
             </SectionHeading>
           </div>
-          <p className="t-lead text-mute lg:col-span-5">
-            Five steps, starting with a short conversation about what your college wants to achieve. You always know
-            what happens next, and who is doing it.
-          </p>
+          <p className="t-lead text-mute lg:col-span-5">{intro.description}</p>
         </div>
 
         <div className="mt-14 md:mt-20">

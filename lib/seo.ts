@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
-import { site, team } from "./site";
+import { getContactInfo, getSeo, getTeam, type ContactInfo, type SeoPath, type TeamMember } from "@/lib/cms";
+import { DEFAULTS } from "@/lib/cms/defaults";
+import { site } from "./site";
 
 /** Describes what the shared OG image actually shows (its headline), for screen readers and link previews. */
 export const OG_IMAGE_ALT = `${site.name} — Bring a national-level hackathon to your campus`;
@@ -18,20 +20,50 @@ export type PageSeo = {
   absoluteTitle?: boolean;
   /** Short name for the breadcrumb trail (defaults to `title`). */
   breadcrumb?: string;
+  /** Link-preview title. Unset = the full page title. */
+  ogTitle?: string | null;
+  /** Link-preview description. Unset = `description`. */
+  ogDescription?: string | null;
 };
 
 const fullTitle = (p: PageSeo) => (p.absoluteTitle ? p.title : `${p.title} | ${site.name}`);
 const abs = (path: string) => `${site.url}${path === "/" ? "" : path}`;
 
+/**
+ * A public page's SEO from the published "Search & sharing" content (the
+ * site's original titles and descriptions until something is published).
+ * Never throws: lib/cms falls back to the defaults.
+ */
+export async function cmsPageSeo(path: SeoPath, opts: { breadcrumb?: string } = {}): Promise<PageSeo> {
+  const s = await getSeo(path);
+  let description = s.description;
+  // The default /contact description names the primary contact. While it hasn't been edited, follow the
+  // published contact details so a changed name or number never lingers in search results.
+  if (path === "/contact" && description === DEFAULTS.seo.pages["/contact"].description) {
+    const { primaryContact: pc } = await getContactInfo();
+    description = `Planning a hackathon for your college? Send Dev Syndicate an enquiry, call ${pc.name} on ${pc.phone.display} or email the team to arrange a conversation.`;
+  }
+  return {
+    title: s.title,
+    description,
+    path,
+    absoluteTitle: s.absoluteTitle || undefined,
+    breadcrumb: opts.breadcrumb,
+    ogTitle: s.ogTitle,
+    ogDescription: s.ogDescription,
+  };
+}
+
 export function pageMetadata(page: PageSeo): Metadata {
-  const title = fullTitle(page);
+  const title = page.ogTitle || fullTitle(page);
+  const description = page.ogDescription || page.description;
   return {
     title: page.absoluteTitle ? { absolute: page.title } : page.title,
     description: page.description,
     alternates: { canonical: page.path },
     openGraph: {
       title,
-      description: page.description,
+      description,
       url: page.path,
       siteName: site.name,
       type: "website",
@@ -41,7 +73,7 @@ export function pageMetadata(page: PageSeo): Metadata {
     twitter: {
       card: "summary_large_image",
       title,
-      description: page.description,
+      description,
       images: [ogImage.url],
     },
   };
@@ -52,11 +84,25 @@ const ids = {
   website: `${site.url}/#website`,
 };
 
+/** The schema.org `founder` list: shown team members whose role names them as a founder. */
+const founders = (members: readonly Pick<TeamMember, "name" | "role" | "linkedin">[]) =>
+  members.filter((m) => /founder/i.test(m.role));
+
 /**
  * Organization + WebSite, rendered on every public page. Only verified facts:
  * name, logo, contact details, city, and the founders' LinkedIn profiles.
+ * Contact details, founders and the description come from published content.
  */
-export function siteJsonLd() {
+export async function siteJsonLd() {
+  const [contact, team, home] = await Promise.all([getContactInfo(), getTeam(), getSeo("/")]);
+  return buildSiteJsonLd(contact, team.members, home.description);
+}
+
+function buildSiteJsonLd(
+  contact: ContactInfo,
+  members: readonly Pick<TeamMember, "name" | "role" | "linkedin">[],
+  description: string,
+) {
   return {
     "@context": "https://schema.org",
     "@graph": [
@@ -66,24 +112,25 @@ export function siteJsonLd() {
         name: site.name,
         url: site.url,
         logo: { "@type": "ImageObject", url: `${site.url}/icon.png`, width: 512, height: 512 },
-        description: site.description,
-        email: site.email,
-        telephone: site.phone.e164,
+        description,
+        email: contact.email,
+        // Only when the company phone is set to be shown on the site.
+        ...(contact.showCompanyPhone ? { telephone: contact.phone.e164 } : {}),
         address: {
           "@type": "PostalAddress",
-          addressLocality: site.location.city,
-          addressRegion: site.location.region,
-          addressCountry: site.location.countryCode,
+          addressLocality: contact.location.city,
+          addressRegion: contact.location.region,
+          addressCountry: contact.location.countryCode,
         },
-        areaServed: { "@type": "Country", name: site.location.country },
-        founder: team.map((p) => ({ "@type": "Person", name: p.name, jobTitle: p.role, sameAs: [p.linkedin] })),
+        areaServed: { "@type": "Country", name: contact.location.country },
+        founder: founders(members).map((p) => ({ "@type": "Person", name: p.name, jobTitle: p.role, sameAs: [p.linkedin] })),
         contactPoint: {
           "@type": "ContactPoint",
           contactType: "sales",
-          name: site.primaryContact.name,
-          telephone: site.primaryContact.phone.e164,
-          email: site.email,
-          areaServed: site.location.countryCode,
+          name: contact.primaryContact.name,
+          telephone: contact.primaryContact.phone.e164,
+          email: contact.email,
+          areaServed: contact.location.countryCode,
           availableLanguage: ["en"],
         },
       },
@@ -92,7 +139,7 @@ export function siteJsonLd() {
         "@id": ids.website,
         url: site.url,
         name: site.name,
-        description: site.description,
+        description,
         inLanguage: "en-IN",
         publisher: { "@id": ids.organization },
       },

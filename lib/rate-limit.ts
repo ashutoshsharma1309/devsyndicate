@@ -21,6 +21,22 @@ export function rateLimit(key: string, limit: number, windowMs: number) {
   return { ok: b.count <= limit, retryAfter: Math.ceil((b.resetAt - now) / 1000) };
 }
 
+/**
+ * Whether `key` still has room under `limit`, without counting this call. For
+ * limits that count failures only: peek first, rateLimit() on a failure,
+ * clearRateLimit() on a success.
+ */
+export function peekRateLimit(key: string, limit: number) {
+  const now = Date.now();
+  const b = buckets.get(key);
+  if (!b || b.resetAt <= now) return { ok: true, retryAfter: 0 };
+  return { ok: b.count < limit, retryAfter: Math.ceil((b.resetAt - now) / 1000) };
+}
+
+export function clearRateLimit(key: string) {
+  buckets.delete(key);
+}
+
 export function clientIp(headers: Headers) {
   return (
     headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||

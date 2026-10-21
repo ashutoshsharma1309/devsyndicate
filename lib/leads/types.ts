@@ -31,6 +31,26 @@ export type Lead = Omit<LeadData, "orgType"> & {
    * (still sending, no mailer, or a lead stored before this was tracked).
    */
   notifyStatus?: NotifyStatus | null;
+  /** YYYY-MM-DD (a day in Asia/Kolkata), or null. */
+  nextFollowUp: string | null;
+  /** YYYY-MM-DD (a day in Asia/Kolkata), or null. */
+  lastContacted: string | null;
+  /** ISO 8601 instant, or null. */
+  meetingAt: string | null;
+  /** Free text, "" when empty. */
+  proposalDetails: string;
+  /** Free text, "" when empty. */
+  lossReason: string;
+};
+
+/** Pipeline fields the admin can set. Only the keys present change. */
+export type PipelinePatch = {
+  status?: LeadStatus;
+  nextFollowUp?: string | null;
+  lastContacted?: string | null;
+  meetingAt?: string | null;
+  proposalDetails?: string;
+  lossReason?: string;
 };
 
 /** Contact fields the admin can correct (privacy policy: right to correction). */
@@ -44,6 +64,9 @@ export type LeadNote = {
   createdAt: string;
 };
 
+export const leadSorts = ["newest", "oldest", "updated"] as const;
+export type LeadSort = (typeof leadSorts)[number];
+
 export type LeadFilters = {
   q?: string;
   status?: LeadStatus;
@@ -54,6 +77,19 @@ export type LeadFilters = {
   from?: string;
   /** YYYY-MM-DD, inclusive, as a day in Asia/Kolkata. */
   to?: string;
+  /** "newest" (default: created, newest first), "oldest" (created, oldest first), "updated" (last change first). */
+  sort?: LeadSort;
+  /** Exact organisationKey() of the institution, e.g. from the organisations list. */
+  org?: string;
+  /** Only leads whose team notification email failed. */
+  notifyStatus?: "failed";
+  /**
+   * Only open leads (not Won or Lost) whose next follow-up is today or earlier (Asia/Kolkata).
+   * A closed lead's leftover date isn't a due follow-up. Matches LeadStats.followUpsDue.
+   */
+  followUpDue?: boolean;
+  /** Only leads that aren't Won or Lost. */
+  open?: boolean;
   /** 1-based; default 1. */
   page?: number;
   /** Default 50, max 200. */
@@ -73,6 +109,16 @@ export type LeadStats = {
   won: number;
   lost: number;
   notifyFailed: number;
+  /** Not Won or Lost. */
+  open: number;
+  /** Status "meeting". */
+  meetings: number;
+  /** Status "proposal". */
+  proposals: number;
+  /** Status "new". */
+  newLeads: number;
+  /** Open leads with a next follow-up today or earlier (Asia/Kolkata); same as the followUpDue filter. */
+  followUpsDue: number;
 };
 
 /** Leads grouped by institution, so repeat enquiries from one place read as one relationship. */
@@ -103,10 +149,35 @@ export type ActivityAction =
   | "export"
   | "admin_created"
   | "admin_updated"
-  | "password_changed";
+  | "password_changed"
+  | "pipeline_updated"
+  | "content_saved"
+  | "content_published"
+  | "content_reverted";
+
+export const activityActions = [
+  "login",
+  "login_failed",
+  "logout",
+  "status_changed",
+  "note_added",
+  "contact_updated",
+  "lead_deleted",
+  "export",
+  "admin_created",
+  "admin_updated",
+  "password_changed",
+  "pipeline_updated",
+  "content_saved",
+  "content_published",
+  "content_reverted",
+] as const satisfies readonly ActivityAction[];
+
+export const isActivityAction = (v: unknown): v is ActivityAction =>
+  (activityActions as readonly unknown[]).includes(v);
 
 export type NewActivity = {
-  /** Display form, e.g. "Asha Rao <asha@x.in>" or "Owner (shared password)". */
+  /** Display form, e.g. "Asha Rao <asha@x.in>" or "jdoe (primary admin)". */
   actor: string;
   action: ActivityAction;
   leadId?: string | null;
@@ -143,6 +214,13 @@ export interface LeadStore {
   listAll(filters?: Omit<LeadFilters, "page" | "pageSize">): Promise<Lead[]>;
   get(id: string): Promise<{ lead: Lead; notes: LeadNote[] } | null>;
   updateStatus(id: string, status: LeadStatus): Promise<void>;
+  /**
+   * Sets pipeline fields; bumps updatedAt. Only the keys present change (null clears a date).
+   * Throws Error("invalid_pipeline") if a value fails validatePipelinePatch().
+   */
+  updatePipeline(id: string, patch: PipelinePatch): Promise<void>;
+  /** Which of these lead ids still exist (one query), e.g. to link activity entries. */
+  existingLeadIds(ids: string[]): Promise<Set<string>>;
   addNote(leadId: string, body: string): Promise<void>;
   countByStatus(): Promise<Record<LeadStatus, number>>;
   stats(): Promise<LeadStats>;
@@ -160,8 +238,8 @@ export interface LeadStore {
   ping(): Promise<void>;
 
   logActivity(entry: NewActivity): Promise<void>;
-  /** Newest first. limit: default 100, max 500. */
-  activity(opts?: { leadId?: string; limit?: number }): Promise<ActivityEntry[]>;
+  /** Newest first. leadId/action filter before the limit. limit: default 100, max 500. */
+  activity(opts?: { leadId?: string; action?: ActivityAction; limit?: number }): Promise<ActivityEntry[]>;
 
   findAdminByEmail(email: string): Promise<AdminAccount | null>;
   getAdmin(id: string): Promise<AdminAccount | null>;
@@ -171,6 +249,11 @@ export interface LeadStore {
   updateAdmin(id: string, patch: { name?: string; passwordHash?: string; disabled?: boolean }): Promise<void>;
   touchAdminLogin(id: string): Promise<void>;
   countActiveAdmins(): Promise<number>;
+  /**
+   * Disables the account unless it's the last active one, as one atomic step (so two admins
+   * disabling each other at once can't leave none). "disabled" also when it already was.
+   */
+  disableAdminIfNotLast(id: string): Promise<"disabled" | "last" | "missing">;
 
   /** Also prunes entries older than a day. */
   recordLoginFailure(key: string): Promise<void>;
@@ -186,10 +269,13 @@ export const MAX_LIST_ALL = 10_000;
 export const DEFAULT_ACTIVITY_LIMIT = 100;
 export const MAX_ACTIVITY_LIMIT = 500;
 
+/** Highest page number accepted: far past any real data, and keeps the offset a small safe integer. */
+export const MAX_PAGE = 100_000;
+
 export function pageOf(f: Pick<LeadFilters, "page" | "pageSize">) {
   const int = (v: unknown, fallback: number) => (Number.isFinite(v) ? Math.floor(v as number) : fallback);
   const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, int(f.pageSize, DEFAULT_PAGE_SIZE)));
-  const page = Math.max(1, int(f.page, 1));
+  const page = Math.min(MAX_PAGE, Math.max(1, int(f.page, 1)));
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
@@ -199,9 +285,15 @@ export const activityLimit = (limit?: number) =>
 // India has no daylight saving, so a fixed +05:30 offset is exact for every date.
 const IST_OFFSET_MS = 330 * 60_000;
 
-/** Start of a YYYY-MM-DD day in Asia/Kolkata as an instant, or null if the date isn't real. */
-function istDayStart(day: string | undefined) {
-  if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+/** Years accepted in dates from filters and pipeline fields; anything else is treated as invalid. */
+export const MIN_YEAR = 2000;
+export const MAX_YEAR = 2100;
+
+/** Start of a YYYY-MM-DD day in Asia/Kolkata as an instant, or null if the date isn't real (or out of range). */
+function istDayStart(day: string | undefined | null) {
+  if (typeof day !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+  const year = Number(day.slice(0, 4));
+  if (year < MIN_YEAR || year > MAX_YEAR) return null;
   const d = new Date(`${day}T00:00:00+05:30`);
   // Rejects 2026-02-31 and similar, which Date would roll over.
   return Number.isNaN(d.getTime()) || new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10) !== day
@@ -215,6 +307,82 @@ export function dateRange(f: Pick<LeadFilters, "from" | "to">) {
   const toStart = istDayStart(f.to);
   return { start, end: toStart ? new Date(toStart.getTime() + 24 * 60 * 60_000) : null };
 }
+
+/** A real YYYY-MM-DD date between MIN_YEAR and MAX_YEAR. */
+export const isIsoDay = (v: unknown): v is string => typeof v === "string" && istDayStart(v) !== null;
+
+/** Today as YYYY-MM-DD in Asia/Kolkata. */
+export const istToday = (now = new Date()) => new Date(now.getTime() + IST_OFFSET_MS).toISOString().slice(0, 10);
+
+/** An ISO 8601 date-time with an explicit offset (or Z), between MIN_YEAR and MAX_YEAR. Returns it normalised to UTC, or null. */
+export function normaliseInstant(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 40) return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(v)) return null;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  const year = d.getUTCFullYear();
+  return year < MIN_YEAR || year > MAX_YEAR ? null : d.toISOString();
+}
+
+export const MAX_PROPOSAL_DETAILS = 4000;
+export const MAX_LOSS_REASON = 1000;
+
+/** Control characters except tab and newline. */
+/** Control characters stripped from free text (keeps \t and \n). */
+export const CONTROL_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F]/g;
+
+/** Free text as the browser counts it: CRLF → LF (a textarea counts a line break as one), no control characters. */
+export const normaliseText = (v: string) => v.replace(/\r\n?/g, "\n").replace(CONTROL_CHARS, "").trim();
+
+/**
+ * Checks and normalises a pipeline patch (dates, instant, text lengths, status). Both stores run it,
+ * and server actions should too, to show field errors. Unknown keys are dropped.
+ */
+export function validatePipelinePatch(
+  input: PipelinePatch,
+): { ok: true; patch: PipelinePatch } | { ok: false; fieldErrors: Partial<Record<keyof PipelinePatch, string>> } {
+  const patch: PipelinePatch = {};
+  const fieldErrors: Partial<Record<keyof PipelinePatch, string>> = {};
+  if (input.status !== undefined) {
+    if (isLeadStatus(input.status)) patch.status = input.status;
+    else fieldErrors.status = "Unknown status.";
+  }
+  for (const k of ["nextFollowUp", "lastContacted"] as const) {
+    const v = input[k];
+    if (v === undefined) continue;
+    if (v === null || v === "") patch[k] = null;
+    else if (isIsoDay(v)) patch[k] = v;
+    else fieldErrors[k] = `Enter a real date between ${MIN_YEAR} and ${MAX_YEAR}.`;
+  }
+  if (input.meetingAt !== undefined) {
+    if (input.meetingAt === null || input.meetingAt === "") patch.meetingAt = null;
+    else {
+      const at = normaliseInstant(input.meetingAt);
+      if (at) patch.meetingAt = at;
+      else fieldErrors.meetingAt = "Enter a real date and time.";
+    }
+  }
+  const texts = [
+    ["proposalDetails", MAX_PROPOSAL_DETAILS],
+    ["lossReason", MAX_LOSS_REASON],
+  ] as const;
+  for (const [k, max] of texts) {
+    const v = input[k];
+    if (v === undefined) continue;
+    if (typeof v !== "string") {
+      fieldErrors[k] = "Enter text.";
+      continue;
+    }
+    const clean = normaliseText(v);
+    if (clean.length > max) fieldErrors[k] = `Keep this under ${max.toLocaleString("en-IN")} characters.`;
+    else patch[k] = clean;
+  }
+  return Object.keys(fieldErrors).length > 0 ? { ok: false, fieldErrors } : { ok: true, patch };
+}
+
+/** Status values that close a lead. */
+export const closedStatuses = ["won", "lost"] as const satisfies readonly LeadStatus[];
+export const isOpenStatus = (s: LeadStatus) => !(closedStatuses as readonly LeadStatus[]).includes(s);
 
 /** "YYYY-MM" of an instant in Asia/Kolkata. */
 export const istMonth = (d: Date) => new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 7);
@@ -249,6 +417,24 @@ export const zeroByOrgType = () =>
   Object.fromEntries([...orgTypes.map((o) => [o.value, 0]), ["unknown", 0]]) as Record<OrgType | "unknown", number>;
 /** Current enquiry types start at zero; older types appear only when stored leads use them. */
 export const zeroByEventType = (): Record<string, number> => Object.fromEntries(eventTypes.map((t) => [t.value, 0]));
+
+/** Stats with every count at zero, e.g. for a page rendered without a store. */
+export const emptyLeadStats = (): LeadStats => ({
+  total: 0,
+  last30Days: 0,
+  byStatus: zeroByStatus(),
+  byOrgType: zeroByOrgType(),
+  byEventType: zeroByEventType(),
+  byMonth: last12Months().map((month) => ({ month, count: 0 })),
+  won: 0,
+  lost: 0,
+  notifyFailed: 0,
+  open: 0,
+  meetings: 0,
+  proposals: 0,
+  newLeads: 0,
+  followUpsDue: 0,
+});
 
 type OrgRow = Pick<Lead, "institution" | "orgType" | "status" | "city" | "createdAt">;
 

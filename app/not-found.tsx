@@ -1,14 +1,22 @@
 import { Footer } from "@/components/footer/footer";
 import { Navbar } from "@/components/navigation/navbar";
 import { ButtonLink } from "@/components/ui/button";
+import { getContactInfo } from "@/lib/cms";
 
 // Next.js already marks 404 responses noindex.
 export const metadata = { title: "Page not found" };
 
-export default function NotFound() {
+export default async function NotFound() {
+  const contact = await getContactInfo();
   return (
     <>
-      <Navbar />
+      <Navbar
+        contact={{
+          email: contact.email,
+          name: contact.primaryContact.name,
+          phone: { display: contact.primaryContact.phone.display, href: contact.primaryContact.phone.href },
+        }}
+      />
       <main id="main" className="on-dark relative overflow-hidden bg-ink text-white">
         <div
           aria-hidden="true"

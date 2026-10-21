@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
-import { faqs } from "@/lib/content";
+import { getContactInfo, getHomepage } from "@/lib/cms";
 import { jsonLd } from "@/lib/seo";
-import { site } from "@/lib/site";
 
-export function faqJsonLd() {
+export function faqJsonLd(faqs: readonly { q: string; a: string }[]) {
   return {
     "@context": "https://schema.org",
     "@type": "FAQPage",
@@ -16,17 +15,20 @@ export function faqJsonLd() {
   };
 }
 
-export function FaqSection() {
+export async function FaqSection() {
+  const [home, contact] = await Promise.all([getHomepage(), getContactInfo()]);
+  const faqs = home.faq.items;
+  const intro = home.sections.faq;
   return (
     <Section id="faq" aria-labelledby="faq-title">
-      <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(faqJsonLd())} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={jsonLd(faqJsonLd(faqs))} />
       <Container>
         <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
           <div className="lg:col-span-4">
             <div className="lg:sticky lg:top-32">
-              <SectionLabel>FAQ</SectionLabel>
+              <SectionLabel>{intro.label}</SectionLabel>
               <SectionHeading id="faq-title" className="mt-6">
-                Questions colleges ask us.
+                {intro.heading}
               </SectionHeading>
               <p className="t-body mt-6 max-w-sm text-mute">
                 Something not covered here?{" "}
@@ -34,8 +36,8 @@ export function FaqSection() {
                   Send us your question
                 </Link>{" "}
                 or write to{" "}
-                <a href={`mailto:${site.email}`} className="text-ink underline decoration-ink/25 underline-offset-4 hover:decoration-signal">
-                  {site.email}
+                <a href={`mailto:${contact.email}`} className="text-ink underline decoration-ink/25 underline-offset-4 hover:decoration-signal">
+                  {contact.email}
                 </a>
                 .
               </p>
@@ -43,8 +45,8 @@ export function FaqSection() {
           </div>
 
           <div className="border-t border-line lg:col-span-8">
-            {faqs.map((f) => (
-              <details key={f.q} className="faq-item group border-b border-line">
+            {faqs.map((f, i) => (
+              <details key={`${i}-${f.q}`} className="faq-item group border-b border-line">
                 <summary className="flex cursor-pointer items-start justify-between gap-6 py-6 text-left text-[1.125rem] font-medium leading-snug tracking-[-0.02em] transition-colors hover:text-signal md:py-7 md:text-[1.25rem]">
                   <h3>{f.q}</h3>
                   <span

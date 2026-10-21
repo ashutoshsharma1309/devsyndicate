@@ -8,7 +8,6 @@ import { ChoiceGroup, describedBy, Field, Input, Select, Textarea } from "@/comp
 import { track } from "@/lib/analytics";
 import { describeAttribution, safePath } from "@/lib/attribution";
 import { CONTACT_ENDPOINT, submitContactForm } from "@/lib/contact/submit";
-import { site } from "@/lib/site";
 import {
   eventFormats,
   eventTypes,
@@ -27,6 +26,19 @@ type Errors = Partial<Record<LeadField, string>>;
 type Status = "idle" | "submitting" | "success" | "error";
 /** Outcome of a plain form post (no JavaScript yet), shown on /contact/invalid and /contact/error. */
 type Notice = "invalid" | "error";
+
+/**
+ * What the published contact-form and contact content decide about the form.
+ * Passed down from the server (components/contact/contact-view.tsx).
+ */
+export type LeadFormSettings = {
+  /** Offered enquiry types, in order. The API accepts only these for new enquiries. */
+  enquiryTypes: readonly { value: string; label: string }[];
+  /** Plain text, may contain line breaks. */
+  confirmationMessage: string;
+  privacyHref: string;
+  contact: { name: string; email: string; phone: { display: string; href: string } };
+};
 
 const empty: Values = {
   // First on the form, so first in focus order too.
@@ -66,9 +78,14 @@ const hints = {
   message: "Dates you're considering, themes, sponsors already involved, venue details — anything that helps.",
 };
 
-function validate(values: Values): Errors {
+const ENQUIRY_MISSING = "Choose what your enquiry is about.";
+
+/** The shared schema, plus: the enquiry type must be one this form offers (as the API checks). */
+function validate(values: Values, offered: LeadFormSettings["enquiryTypes"]): Errors {
   const r = leadSchema.safeParse(values);
-  return r.success ? {} : fieldErrors(r.error.issues);
+  const errors: Errors = r.success ? {} : fieldErrors(r.error.issues);
+  if (!errors.eventType && !offered.some((t) => t.value === values.eventType)) errors.eventType = ENQUIRY_MISSING;
+  return errors;
 }
 
 /** The organisation-name field follows "You're contacting us from"; nothing chosen reads as the general case. */
@@ -90,18 +107,39 @@ const formatNotes: Record<string, string> = {
   custom: "We're interested in a custom format.",
 };
 
-/** Reads `?format=` (from "Discuss this format" links) or `?type=` to pre-select the enquiry type. */
-export function LeadFormWithPreset() {
+/**
+ * Reads `?format=` (from "Discuss this format" links) or `?type=` to pre-select the enquiry type.
+ * Only types the form offers are pre-selected.
+ */
+export function LeadFormWithPreset({ settings }: { settings: LeadFormSettings }) {
   const params = useSearchParams();
   const key = params.get("type") ?? params.get("format") ?? "";
+  const offered = (v: string) => settings.enquiryTypes.some((t) => t.value === v);
   // Sponsors are companies, so that link can answer "who are you" too.
-  if (key === "sponsorship") return <LeadForm preset={{ eventType: key, orgType: "company" }} />;
-  if (eventTypes.some((t) => t.value === key)) return <LeadForm preset={{ eventType: key }} />;
-  if (formatNotes[key]) return <LeadForm preset={{ eventType: "general", message: formatNotes[key] }} />;
-  return <LeadForm />;
+  if (key === "sponsorship" && offered(key)) {
+    return <LeadForm settings={settings} preset={{ eventType: key, orgType: "company" }} />;
+  }
+  if (offered(key)) return <LeadForm settings={settings} preset={{ eventType: key }} />;
+  if (formatNotes[key]) {
+    return (
+      <LeadForm
+        settings={settings}
+        preset={{ eventType: offered("general") ? "general" : "", message: formatNotes[key] }}
+      />
+    );
+  }
+  return <LeadForm settings={settings} />;
 }
 
-export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<Values>; notice?: Notice }) {
+export function LeadForm({
+  preset,
+  notice: initialNotice,
+  settings,
+}: {
+  preset?: Partial<Values>;
+  notice?: Notice;
+  settings: LeadFormSettings;
+}) {
   const [values, setValues] = useState<Values>(() => ({ ...empty, ...preset }));
   const [errors, setErrors] = useState<Errors>({});
   const [touched, setTouched] = useState<Partial<Record<LeadField, boolean>>>({});
@@ -130,14 +168,14 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
     setValues(next);
     // Once a field has shown an error, re-check it as the visitor types.
     if (errors[field] || touched[field]) {
-      setErrors((e) => ({ ...e, [field]: validate(next)[field] }));
+      setErrors((e) => ({ ...e, [field]: validate(next, settings.enquiryTypes)[field] }));
     }
   };
 
   const blur = (field: LeadField) => {
     setTouched((t) => ({ ...t, [field]: true }));
     // Don't nag about empty fields until the visitor tries to submit.
-    if (values[field] !== "") setErrors((e) => ({ ...e, [field]: validate(values)[field] }));
+    if (values[field] !== "") setErrors((e) => ({ ...e, [field]: validate(values, settings.enquiryTypes)[field] }));
   };
 
   const control = (field: LeadField, hint?: string) => ({
@@ -161,7 +199,7 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
     if (status === "submitting") return;
 
     setNotice(undefined);
-    const errs = validate(values);
+    const errs = validate(values, settings.enquiryTypes);
     setErrors(errs);
     const first = order.find((f) => errs[f]);
     if (first) {
@@ -200,7 +238,7 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
     setStatus("error");
   }
 
-  const contact = site.primaryContact;
+  const contact = settings.contact;
   const institution = copyFor(values.orgType);
   // The schema's "required" message names colleges; match it to the organisation chosen.
   const institutionError =
@@ -210,6 +248,7 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
     return (
       <Received
         ref={resultRef}
+        settings={settings}
         details={[
           [institution.short, values.institution],
           ["Enquiry", labelFor(eventTypes, values.eventType)],
@@ -245,8 +284,8 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
               {contact.phone.display}
             </a>{" "}
             or email{" "}
-            <a className="underline underline-offset-4" href={`mailto:${site.email}`}>
-              {site.email}
+            <a className="underline underline-offset-4" href={`mailto:${contact.email}`}>
+              {contact.email}
             </a>
             .
           </p>
@@ -343,7 +382,7 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
             name="eventType"
             legend="What is your enquiry about?"
             required
-            options={eventTypes}
+            options={settings.enquiryTypes}
             value={values.eventType}
             onChange={(v) => set("eventType", v)}
             error={errors.eventType}
@@ -408,8 +447,8 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
               {contact.phone.display}
             </a>{" "}
             or email{" "}
-            <a className="underline underline-offset-4" href={`mailto:${site.email}`}>
-              {site.email}
+            <a className="underline underline-offset-4" href={`mailto:${contact.email}`}>
+              {contact.email}
             </a>
             .
           </p>
@@ -420,7 +459,7 @@ export function LeadForm({ preset, notice: initialNotice }: { preset?: Partial<V
         <p id="form-note" className="max-w-sm text-[0.8125rem] leading-relaxed text-mute">
           Fields marked <span className="text-signal">*</span> are required. We use these details only to respond to
           your enquiry and never share them for marketing — see our{" "}
-          <Link href="/privacy" className="underline underline-offset-4 hover:text-ink">
+          <Link href={settings.privacyHref} className="underline underline-offset-4 hover:text-ink">
             privacy policy
           </Link>
           .
@@ -473,8 +512,16 @@ function Group({ n, title, children }: { n: string; title: string; children: Rea
  * Confirmation once the server has accepted the enquiry. `details` echo what the visitor typed, so they're only
  * shown in the same page session — never after the plain-form redirect, which carries nothing but the outcome.
  */
-export function Received({ ref, details }: { ref?: Ref<HTMLDivElement>; details?: [string, string][] }) {
-  const contact = site.primaryContact;
+export function Received({
+  ref,
+  details,
+  settings,
+}: {
+  ref?: Ref<HTMLDivElement>;
+  details?: [string, string][];
+  settings: LeadFormSettings;
+}) {
+  const contact = settings.contact;
   return (
     <div ref={ref} tabIndex={-1} role="status" className="rounded-md border border-line bg-white p-7 outline-none md:p-12">
       <span className="grid size-12 place-items-center rounded-full bg-signal text-white">
@@ -485,10 +532,7 @@ export function Received({ ref, details }: { ref?: Ref<HTMLDivElement>; details?
       <h2 className="mt-8 text-[clamp(1.75rem,1.4rem+1.2vw,2.5rem)] font-medium leading-tight tracking-[-0.035em]">
         Enquiry received.
       </h2>
-      <p className="t-lead mt-4 max-w-xl text-mute">
-        Thank you. Your enquiry has reached the Dev Syndicate team. We&apos;ll review the details and get in touch to
-        arrange a conversation.
-      </p>
+      <p className="t-lead mt-4 max-w-xl whitespace-pre-line text-mute">{settings.confirmationMessage}</p>
       {details && (
         <dl className="mt-8 grid gap-px overflow-hidden rounded-sm border border-line bg-line text-sm sm:grid-cols-3">
           {details.map(([k, v]) => (

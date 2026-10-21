@@ -15,8 +15,12 @@ function key() {
 
 export const sessionConfigured = () => key() !== null;
 
-/** Who a session belongs to. sub is an admin account id, or "owner" for the shared password. */
-export type SessionIdentity = { sub: string; name: string; email: string | null };
+/**
+ * Who a session belongs to. sub is an admin account id, or "owner" for the primary admin
+ * (ADMIN_USERNAME + ADMIN_PASSWORD_HASH). pv is a keyed fingerprint of the password the
+ * session was started with: requireAdmin() rejects the token once the password changes.
+ */
+export type SessionIdentity = { sub: string; name: string; email: string | null; pv: string | null };
 
 export const OWNER_SUB = "owner";
 
@@ -30,7 +34,7 @@ export const SESSION_ENDED_PARAM = "ended";
 export async function signSession(identity: SessionIdentity) {
   const k = key();
   if (!k) throw new Error("SESSION_SECRET must be set (32+ characters).");
-  return new SignJWT({ role: "admin", name: identity.name, email: identity.email })
+  return new SignJWT({ role: "admin", name: identity.name, email: identity.email, pv: identity.pv })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(identity.sub)
     .setIssuedAt()
@@ -40,9 +44,9 @@ export async function signSession(identity: SessionIdentity) {
 }
 
 /**
- * The identity in a valid token, or null. Tokens issued before named accounts
- * existed carry no sub and are treated as the owner. This only checks the
- * signature; requireAdmin() also checks that a named account is still active.
+ * The identity in a valid token, or null. Tokens from before named accounts
+ * existed carry no sub and are no longer accepted. This only checks the
+ * signature; requireAdmin() also checks the account and the password fingerprint.
  */
 export async function readSession(token: string | undefined): Promise<SessionIdentity | null> {
   const k = key();
@@ -50,11 +54,12 @@ export async function readSession(token: string | undefined): Promise<SessionIde
   try {
     const { payload } = await jwtVerify(token, k, { algorithms: ["HS256"], audience: "ds-admin" });
     if (payload.role !== "admin") return null;
-    if (!payload.sub || payload.sub === OWNER_SUB) return { sub: OWNER_SUB, name: "Owner", email: null };
+    if (!payload.sub) return null;
     return {
       sub: payload.sub,
       name: typeof payload.name === "string" ? payload.name : "",
       email: typeof payload.email === "string" ? payload.email : null,
+      pv: typeof payload.pv === "string" ? payload.pv : null,
     };
   } catch {
     return null;

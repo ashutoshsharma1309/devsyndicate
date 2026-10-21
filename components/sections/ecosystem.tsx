@@ -1,11 +1,13 @@
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
+import { getHomepage } from "@/lib/cms";
 import { ecosystem } from "@/lib/content";
 
 /**
  * Six participants in a hackathon, joined by one signal path. A pulse runs
  * the length of the path and each node lights as it passes. Pure CSS.
  */
-export function EcosystemSection() {
+export async function EcosystemSection() {
+  const intro = (await getHomepage()).sections.ecosystem;
   const n = ecosystem.length;
   return (
     <Section tone="dark" aria-labelledby="ecosystem-title" className="overflow-clip">
@@ -16,15 +18,12 @@ export function EcosystemSection() {
       <Container className="relative">
         <div className="grid gap-8 lg:grid-cols-12 lg:items-end">
           <div className="lg:col-span-7">
-            <SectionLabel tone="dark">The ecosystem</SectionLabel>
+            <SectionLabel tone="dark">{intro.label}</SectionLabel>
             <SectionHeading id="ecosystem-title" className="mt-6">
-              Connect students with the people building technology.
+              {intro.heading}
             </SectionHeading>
           </div>
-          <p className="t-lead text-white/70 lg:col-span-5">
-            A hackathon is only as good as the people around the builders. We bring the right people into the room,
-            and make sure each one has a defined role.
-          </p>
+          <p className="t-lead text-white/70 lg:col-span-5">{intro.description}</p>
         </div>
 
         <ol

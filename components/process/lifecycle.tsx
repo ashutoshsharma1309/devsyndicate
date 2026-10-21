@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { lifecycle, type Phase } from "@/lib/content";
+import { PHASES, type LifecycleStage } from "@/lib/cms/schema";
 import { cn } from "@/lib/utils";
 
-const phases: Phase[] = ["Plan", "Build-up", "Live", "After"];
+const phases = PHASES;
 
 /**
  * Large-screen spotlight: inactive stages are dimmed by colour rather than
@@ -25,11 +25,12 @@ const dim = {
 const fade = "transition-colors duration-500";
 
 /**
- * The eight-stage hackathon lifecycle. On large screens a sticky panel tracks
- * the stage closest to the middle of the viewport; on small screens it is a
- * plain vertical timeline.
+ * The hackathon lifecycle (the visible stages from the published services
+ * content, eight by default). On large screens a sticky panel tracks the stage
+ * closest to the middle of the viewport; on small screens it is a plain
+ * vertical timeline.
  */
-export function Lifecycle() {
+export function Lifecycle({ stages: lifecycle }: { stages: readonly Pick<LifecycleStage, "n" | "title" | "phase" | "body" | "deliverables">[] }) {
   const [active, setActive] = useState(0);
   const itemRefs = useRef<(HTMLLIElement | null)[]>([]);
 
@@ -47,9 +48,13 @@ export function Lifecycle() {
     );
     itemRefs.current.forEach((el) => el && io.observe(el));
     return () => io.disconnect();
-  }, []);
+  }, [lifecycle.length]);
 
-  const stage = lifecycle[active];
+  if (lifecycle.length === 0) return null;
+  // Clamped in case the list got shorter (a preview refresh) while a later stage was active.
+  const current = Math.min(active, lifecycle.length - 1);
+  const stage = lifecycle[current];
+  const total = String(lifecycle.length).padStart(2, "0");
 
   return (
     <div className="grid gap-12 lg:grid-cols-12 lg:gap-16">
@@ -60,14 +65,14 @@ export function Lifecycle() {
           <div className="relative w-px bg-white/10">
             <div
               className="absolute inset-x-0 top-0 bg-signal-soft transition-[height] duration-700 ease-[var(--ease-out-expo)]"
-              style={{ height: `${((active + 1) / lifecycle.length) * 100}%` }}
+              style={{ height: `${((current + 1) / lifecycle.length) * 100}%` }}
             />
             {lifecycle.map((s, i) => (
               <span
-                key={s.n}
+                key={i}
                 className={cn(
                   "absolute -left-[3px] size-[7px] rounded-full border transition-colors duration-500",
-                  i <= active ? "border-signal-soft bg-signal-soft" : "border-white/25 bg-ink",
+                  i <= current ? "border-signal-soft bg-signal-soft" : "border-white/25 bg-ink",
                 )}
                 style={{ top: `calc(${((i + 0.5) / lifecycle.length) * 100}% - 3.5px)` }}
               />
@@ -77,9 +82,9 @@ export function Lifecycle() {
           <div className="flex flex-1 flex-col justify-between">
             <div>
               <p className="t-label text-mute-dark">
-                Stage {stage.n} <span className="text-white/25">/</span> 08
+                Stage {stage.n} <span className="text-white/25">/</span> {total}
               </p>
-              <div key={active} className="fade-in">
+              <div key={current} className="fade-in">
                 <p className="mt-6 font-mono text-[7.5rem] font-medium leading-none tracking-[-0.06em] text-signal-soft tabular-nums">
                   {stage.n}
                 </p>
@@ -108,12 +113,12 @@ export function Lifecycle() {
         <span aria-hidden="true" className="absolute bottom-3 left-[7px] top-3 w-px bg-white/10 lg:hidden" />
         {lifecycle.map((s, i) => (
           <li
-            key={s.n}
+            key={i}
             ref={(el) => {
               itemRefs.current[i] = el;
             }}
             data-index={i}
-            data-active={i === active}
+            data-active={i === current}
             className={cn(
               "group relative pb-12 pl-10 last:pb-0 lg:flex lg:min-h-[44vh] lg:items-center lg:pb-0 lg:pl-0",
             )}
@@ -141,9 +146,9 @@ export function Lifecycle() {
               </h3>
               <p className={cn("t-body mt-4 text-white/70 md:text-lg md:leading-relaxed", fade, dim.text)}>{s.body}</p>
               <ul className="mt-6 flex flex-wrap gap-2" aria-label={`${s.title} deliverables`}>
-                {s.deliverables.map((d) => (
+                {s.deliverables.map((d, j) => (
                   <li
-                    key={d}
+                    key={`${j}-${d}`}
                     className={cn(
                       "t-label rounded-xs border border-white/10 px-2.5 py-1.5 text-white/70",
                       fade,

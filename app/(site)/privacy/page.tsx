@@ -1,19 +1,21 @@
+import type { Metadata } from "next";
 import { LegalPage } from "@/components/layout/legal";
 import { PageJsonLd } from "@/components/layout/json-ld";
-import { pageMetadata, type PageSeo } from "@/lib/seo";
+import { getContactInfo } from "@/lib/cms";
+import { cmsPageSeo, pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
 
-const page: PageSeo = {
-  title: "Privacy Policy",
-  description: "How Dev Syndicate collects, uses and protects the information you share through this website.",
-  path: "/privacy",
-};
+const seo = () => cmsPageSeo("/privacy");
 
-export const metadata = pageMetadata(page);
+export async function generateMetadata(): Promise<Metadata> {
+  return pageMetadata(await seo());
+}
 
-const mail = <a href={`mailto:${site.email}`}>{site.email}</a>;
-
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  const [page, contact] = await Promise.all([seo(), getContactInfo()]);
+  const mail = <a href={`mailto:${contact.email}`}>{contact.email}</a>;
+  // The company line, unless it is hidden in the published contact details; then the primary contact's.
+  const phone = contact.showCompanyPhone ? contact.phone : contact.primaryContact.phone;
   return (
     <>
       <PageJsonLd page={page} />
@@ -104,10 +106,17 @@ export default function PrivacyPage() {
           id: "retention",
           title: "How long we keep it",
           body: (
-            <p>
-              We keep request details for as long as we need them to respond to you and to manage our relationship
-              with your institution. You can ask us to delete them at any time.
-            </p>
+            <>
+              <p>
+                We keep request details for as long as we need them to respond to you and to manage our relationship
+                with your institution. You can ask us to delete them at any time.
+              </p>
+              <p>
+                Our team&apos;s internal activity log records changes made to requests, with the name of the
+                institution each one belongs to. That entry stays after a request is deleted. It doesn&apos;t include
+                your name, email address, phone number or anything else you wrote.
+              </p>
+            </>
           ),
         },
         {
@@ -155,7 +164,7 @@ export default function PrivacyPage() {
           body: (
             <p>
               If we change how we handle information, we&apos;ll update this page and the date at the top. Questions
-              about this policy can be sent to {mail} or {site.phone.display}.
+              about this policy can be sent to {mail} or {phone.display}.
             </p>
           ),
         },

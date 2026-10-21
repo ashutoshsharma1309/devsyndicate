@@ -1,11 +1,23 @@
-import { process } from "@/lib/content";
+import { getHowItWorks } from "@/lib/cms";
 import { cn } from "@/lib/utils";
 
+/** Large-screen columns for the compact stepper. Tailwind needs whole class names, so the common counts are listed. */
+const stepperCols: Record<number, string> = {
+  1: "lg:grid-cols-1",
+  2: "lg:grid-cols-2",
+  3: "lg:grid-cols-3",
+  4: "lg:grid-cols-4",
+  5: "lg:grid-cols-5",
+  6: "lg:grid-cols-6",
+};
+
 /**
- * The five-step partnership process. `compact` is a horizontal stepper on
- * large screens (homepage); `detailed` adds what each side contributes.
+ * The partnership process (five steps by default, from the published
+ * how-it-works content, numbered in order). `compact` is a horizontal stepper
+ * on large screens (homepage); `detailed` adds what each side contributes.
  */
-export function ProcessSteps({ variant = "compact" }: { variant?: "compact" | "detailed" }) {
+export async function ProcessSteps({ variant = "compact" }: { variant?: "compact" | "detailed" }) {
+  const process = (await getHowItWorks()).steps.map((s, i) => ({ ...s, n: String(i + 1).padStart(2, "0") }));
   if (variant === "detailed") {
     return (
       <ol className="border-t border-line">
@@ -40,7 +52,7 @@ export function ProcessSteps({ variant = "compact" }: { variant?: "compact" | "d
   }
 
   return (
-    <ol className="relative grid lg:grid-cols-5">
+    <ol className={cn("relative grid", stepperCols[process.length] ?? "lg:grid-cols-5")}>
       <span aria-hidden="true" className="absolute bottom-2 left-[5px] top-2 w-px bg-line lg:hidden" />
       <span aria-hidden="true" className="absolute inset-x-0 top-[5px] hidden h-px bg-line lg:block" />
       {process.map((s, i) => (

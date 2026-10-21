@@ -1,5 +1,5 @@
-// Applies db/schema.sql to DATABASE_URL. Safe to run more than once.
-// Usage: npm run db:setup
+// Applies db/schema.sql to DATABASE_URL. Safe to run more than once (it never drops data).
+// Usage: npm run db:setup — run it before deploying a version that adds columns or tables.
 import { readFile } from "node:fs/promises";
 import postgres from "postgres";
 
@@ -17,7 +17,7 @@ const sql = postgres(url, {
 });
 try {
   await sql.unsafe(await readFile(new URL("../db/schema.sql", import.meta.url), "utf8"));
-  console.log("✓ Lead, admin and activity tables are ready.");
+  console.log("✓ Lead, admin, activity and site content tables are ready.");
 } catch (err) {
   console.error("✗ Failed to apply schema:", err.message);
   process.exitCode = 1;

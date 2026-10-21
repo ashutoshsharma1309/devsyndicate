@@ -3,22 +3,52 @@ import { PageHero } from "@/components/layout/page-hero";
 import { FinalCta } from "@/components/sections/final-cta";
 import { TeamSection } from "@/components/sections/team";
 import { Container, Section, SectionHeading, SectionLabel } from "@/components/ui/section";
+import type { Metadata } from "next";
+import type { ReactNode } from "react";
+import { getContactInfo } from "@/lib/cms";
 import { audiences, principles } from "@/lib/content";
-import { pageMetadata, type PageSeo } from "@/lib/seo";
+import { cmsPageSeo, pageMetadata } from "@/lib/seo";
 import { site } from "@/lib/site";
 
-const page: PageSeo = {
-  title: "About Dev Syndicate | Hackathon Partner for Colleges",
-  absoluteTitle: true,
-  breadcrumb: "About",
-  description:
-    "Meet Dev Syndicate, a Bengaluru-based hackathon partner for colleges led by Shiven Kumar and Ashutosh Sharma — why we exist, how we work and who we work with.",
-  path: "/about",
-};
+const seo = () => cmsPageSeo("/about", { breadcrumb: "About" });
 
-export const metadata = pageMetadata(page);
+export async function generateMetadata(): Promise<Metadata> {
+  return pageMetadata(await seo());
+}
 
-export default function AboutPage() {
+const detailLink = "underline decoration-ink/25 underline-offset-4 hover:decoration-signal";
+
+export default async function AboutPage() {
+  const [page, contact] = await Promise.all([seo(), getContactInfo()]);
+  const details: [string, ReactNode][] = [
+    ["Company", site.name],
+    ["What we do", "Hackathon planning, promotion and execution for colleges and institutions"],
+    ["Based in", `${contact.location.city}, ${contact.location.region}, ${contact.location.country}`],
+    ["Works with", "Colleges and institutions across India — on campus, online or hybrid"],
+    [
+      "Email",
+      <a key="e" href={`mailto:${contact.email}`} className={detailLink}>
+        {contact.email}
+      </a>,
+    ],
+    [
+      "Primary contact",
+      <span key="c">
+        {contact.primaryContact.name}, {contact.primaryContact.role} ·{" "}
+        <a href={contact.primaryContact.phone.href} className={detailLink}>
+          {contact.primaryContact.phone.display}
+        </a>
+      </span>,
+    ],
+  ];
+  if (contact.showCompanyPhone) {
+    details.push([
+      "Phone",
+      <a key="p" href={contact.phone.href} className={detailLink}>
+        {contact.phone.display}
+      </a>,
+    ]);
+  }
   return (
     <>
       <PageJsonLd page={page} />
@@ -111,37 +141,8 @@ export default function AboutPage() {
               </SectionHeading>
             </div>
             <dl className="divide-y divide-line border-y border-line lg:col-span-7">
-              {[
-                ["Company", site.name],
-                ["What we do", "Hackathon planning, promotion and execution for colleges and institutions"],
-                ["Based in", `${site.location.city}, ${site.location.region}, ${site.location.country}`],
-                ["Works with", "Colleges and institutions across India — on campus, online or hybrid"],
-                [
-                  "Email",
-                  <a key="e" href={`mailto:${site.email}`} className="underline decoration-ink/25 underline-offset-4 hover:decoration-signal">
-                    {site.email}
-                  </a>,
-                ],
-                [
-                  "Primary contact",
-                  <span key="c">
-                    {site.primaryContact.name}, {site.primaryContact.role} ·{" "}
-                    <a
-                      href={site.primaryContact.phone.href}
-                      className="underline decoration-ink/25 underline-offset-4 hover:decoration-signal"
-                    >
-                      {site.primaryContact.phone.display}
-                    </a>
-                  </span>,
-                ],
-                [
-                  "Phone",
-                  <a key="p" href={site.phone.href} className="underline decoration-ink/25 underline-offset-4 hover:decoration-signal">
-                    {site.phone.display}
-                  </a>,
-                ],
-              ].map(([k, v]) => (
-                <div key={k as string} className="grid gap-1 py-5 sm:grid-cols-[10rem_1fr] sm:gap-6">
+              {details.map(([k, v]) => (
+                <div key={k} className="grid gap-1 py-5 sm:grid-cols-[10rem_1fr] sm:gap-6">
                   <dt className="t-label pt-1 text-mute">{k}</dt>
                   <dd className="text-[1.0625rem]">{v}</dd>
                 </div>

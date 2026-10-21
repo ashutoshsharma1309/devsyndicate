@@ -5,10 +5,13 @@ import {
   contactFields,
   dateRange,
   groupOrganisations,
+  istToday,
   last12Months,
   likePattern,
   MAX_LIST_ALL,
+  organisationKey,
   pageOf,
+  validatePipelinePatch,
   zeroByEventType,
   zeroByOrgType,
   zeroByStatus,
@@ -47,6 +50,11 @@ type Row = {
   /** Absent until `npm run db:setup` has added the columns. */
   notify_status?: NotifyStatus | null;
   org_type?: string;
+  next_follow_up?: Date | string | null;
+  last_contacted?: Date | string | null;
+  meeting_at?: Date | null;
+  proposal_details?: string;
+  loss_reason?: string;
 };
 
 type AdminRow = {
@@ -68,6 +76,13 @@ type ActivityRow = {
   lead_label: string | null;
   detail: string | null;
 };
+
+/**
+ * A `date` column as YYYY-MM-DD. postgres.js parses dates with `new Date("YYYY-MM-DD")`,
+ * which is midnight UTC, so the UTC date is the stored day.
+ */
+const toDay = (v: Date | string | null | undefined) =>
+  v == null ? null : v instanceof Date ? (Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10)) : String(v).slice(0, 10);
 
 const toLead = (r: Row): Lead => ({
   id: r.id,
@@ -91,6 +106,11 @@ const toLead = (r: Row): Lead => ({
   message: r.message,
   source: r.source,
   notifyStatus: r.notify_status ?? null,
+  nextFollowUp: toDay(r.next_follow_up),
+  lastContacted: toDay(r.last_contacted),
+  meetingAt: r.meeting_at ? r.meeting_at.toISOString() : null,
+  proposalDetails: r.proposal_details ?? "",
+  lossReason: r.loss_reason ?? "",
 });
 
 const toAdmin = (r: AdminRow): AdminAccount => ({
@@ -115,7 +135,15 @@ const toActivity = (r: ActivityRow): ActivityEntry => ({
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Postgres error codes we handle: a missing table (db:setup not run yet) and a unique violation. */
+/**
+ * A uuid[] for `= any(...)` as one text parameter (postgres.js doesn't serialise a plain JS array
+ * of unknown type). Only validated UUIDs go in, so the comma split is exact; [] matches nothing.
+ */
+function uuidList(ids: string[]) {
+  return db()`string_to_array(${ids.filter((id) => UUID.test(id)).join(",")}, ',')::uuid[]`;
+}
+
+/** Postgres error codes we handle: a missing table or column (db:setup not run yet) and a unique violation. */
 const pgCode = (err: unknown) => (err as { code?: string } | null)?.code;
 
 // One connection pool per server process (survives dev hot reloads).
@@ -135,8 +163,22 @@ function db() {
   return globalForDb.__dsSql;
 }
 
+type ListFilters = Omit<LeadFilters, "page" | "pageSize">;
+
+/**
+ * The lead ids whose institution has this organisationKey(). Computed in JS, so the grouping is
+ * exactly the organisations list's (Postgres regex classes depend on the database locale).
+ * null when the filter isn't set.
+ */
+async function orgLeadIds(sql: postgres.Sql, f: ListFilters): Promise<string[] | null> {
+  if (!f.org) return null;
+  const rows = await sql<{ id: string; institution: string }[]>`
+    select id, institution from leads order by created_at desc limit ${MAX_LIST_ALL}`;
+  return rows.filter((r) => organisationKey(r.institution) === f.org).map((r) => r.id);
+}
+
 /** Filters as a parameterised WHERE clause. Dates are Asia/Kolkata days, resolved to instants in JS. */
-function whereClause(sql: postgres.Sql, f: Omit<LeadFilters, "page" | "pageSize">) {
+function whereClause(sql: postgres.Sql, f: ListFilters, orgIds: string[] | null) {
   const q = f.q?.trim() ? likePattern(f.q.trim()) : null;
   const { start, end } = dateRange(f);
   return sql`
@@ -150,7 +192,18 @@ function whereClause(sql: postgres.Sql, f: Omit<LeadFilters, "page" | "pageSize"
         q
           ? sql`and (institution ilike ${q} or name ilike ${q} or email ilike ${q} or city ilike ${q} or state ilike ${q} or phone ilike ${q})`
           : sql``
-      }`;
+      }
+      ${orgIds ? sql`and id = any(${uuidList(orgIds)})` : sql``}
+      ${f.notifyStatus ? sql`and notify_status = ${f.notifyStatus}` : sql``}
+      ${f.open || f.followUpDue ? sql`and status not in ('won', 'lost')` : sql``}
+      ${f.followUpDue ? sql`and next_follow_up <= ${istToday()}::date` : sql``}`;
+}
+
+/** ORDER BY for a sort option; fixed fragments only. */
+function orderBy(sql: postgres.Sql, sort: LeadFilters["sort"]) {
+  if (sort === "oldest") return sql`order by created_at asc`;
+  if (sort === "updated") return sql`order by updated_at desc, created_at desc`;
+  return sql`order by created_at desc`;
 }
 
 export const postgresStore: LeadStore = {
@@ -158,33 +211,51 @@ export const postgresStore: LeadStore = {
 
   async create(l: NewLead) {
     const sql = db();
-    const [row] = await sql<Row[]>`
-      insert into leads (
-        institution, city, state, website, name, designation, email, phone,
-        event_type, org_type, participants, format, timeline, theme, message, source, ip_hash
-      ) values (
-        ${l.institution}, ${l.city}, ${l.state}, ${l.website}, ${l.name}, ${l.designation}, ${l.email}, ${l.phone},
-        ${l.eventType}, ${l.orgType}, ${l.participants}, ${l.format}, ${l.timeline}, ${l.theme}, ${l.message}, ${l.source}, ${l.ipHash}
-      )
-      returning *`;
-    return toLead(row);
+    try {
+      const [row] = await sql<Row[]>`
+        insert into leads (
+          institution, city, state, website, name, designation, email, phone,
+          event_type, org_type, participants, format, timeline, theme, message, source, ip_hash
+        ) values (
+          ${l.institution}, ${l.city}, ${l.state}, ${l.website}, ${l.name}, ${l.designation}, ${l.email}, ${l.phone},
+          ${l.eventType}, ${l.orgType}, ${l.participants}, ${l.format}, ${l.timeline}, ${l.theme}, ${l.message}, ${l.source}, ${l.ipHash}
+        )
+        returning *`;
+      return toLead(row);
+    } catch (err) {
+      // Deployed before `npm run db:setup` added org_type: still store the lead rather than lose it.
+      if (pgCode(err) !== "42703") throw err;
+      console.error("[leads] leads.org_type is missing; run npm run db:setup. Storing the lead without it.");
+      const [row] = await sql<Row[]>`
+        insert into leads (
+          institution, city, state, website, name, designation, email, phone,
+          event_type, participants, format, timeline, theme, message, source, ip_hash
+        ) values (
+          ${l.institution}, ${l.city}, ${l.state}, ${l.website}, ${l.name}, ${l.designation}, ${l.email}, ${l.phone},
+          ${l.eventType}, ${l.participants}, ${l.format}, ${l.timeline}, ${l.theme}, ${l.message}, ${l.source}, ${l.ipHash}
+        )
+        returning *`;
+      return toLead(row);
+    }
   },
 
   async list(f: LeadFilters = {}) {
     const sql = db();
     const { page, pageSize, offset } = pageOf(f);
+    const orgIds = await orgLeadIds(sql, f);
     // A fresh fragment per query: postgres.js fragments are single-use query objects.
     const [rows, [count]] = await Promise.all([
-      sql<Row[]>`select * from leads ${whereClause(sql, f)} order by created_at desc limit ${pageSize} offset ${offset}`,
-      sql<{ n: number }[]>`select count(*)::int as n from leads ${whereClause(sql, f)}`,
+      sql<Row[]>`select * from leads ${whereClause(sql, f, orgIds)} ${orderBy(sql, f.sort)} limit ${pageSize} offset ${offset}`,
+      sql<{ n: number }[]>`select count(*)::int as n from leads ${whereClause(sql, f, orgIds)}`,
     ]);
     return { leads: rows.map(toLead), total: count?.n ?? 0, page, pageSize };
   },
 
   async listAll(f = {}) {
     const sql = db();
+    const orgIds = await orgLeadIds(sql, f);
     const rows = await sql<Row[]>`
-      select * from leads ${whereClause(sql, f)} order by created_at desc limit ${MAX_LIST_ALL}`;
+      select * from leads ${whereClause(sql, f, orgIds)} ${orderBy(sql, f.sort)} limit ${MAX_LIST_ALL}`;
     return rows.map(toLead);
   },
 
@@ -208,6 +279,31 @@ export const postgresStore: LeadStore = {
     await db()`update leads set status = ${status}, updated_at = now() where id = ${id}`;
   },
 
+  async updatePipeline(id, input) {
+    const checked = validatePipelinePatch(input);
+    if (!checked.ok) throw new Error("invalid_pipeline");
+    const p = checked.patch;
+    if (!UUID.test(id)) return;
+    const sql = db();
+    // Fixed column names; each fragment is present only for a key in the patch.
+    await sql`
+      update leads set updated_at = now()
+        ${p.status !== undefined ? sql`, status = ${p.status}` : sql``}
+        ${p.nextFollowUp !== undefined ? sql`, next_follow_up = ${p.nextFollowUp}::date` : sql``}
+        ${p.lastContacted !== undefined ? sql`, last_contacted = ${p.lastContacted}::date` : sql``}
+        ${p.meetingAt !== undefined ? sql`, meeting_at = ${p.meetingAt}::timestamptz` : sql``}
+        ${p.proposalDetails !== undefined ? sql`, proposal_details = ${p.proposalDetails}` : sql``}
+        ${p.lossReason !== undefined ? sql`, loss_reason = ${p.lossReason}` : sql``}
+      where id = ${id}`;
+  },
+
+  async existingLeadIds(ids) {
+    const valid = [...new Set(ids)].filter((id) => UUID.test(id));
+    if (valid.length === 0) return new Set();
+    const rows = await db()<{ id: string }[]>`select id from leads where id = any(${uuidList(valid)})`;
+    return new Set(rows.map((r) => r.id));
+  },
+
   async addNote(leadId, body) {
     if (!UUID.test(leadId)) return;
     const sql = db();
@@ -227,7 +323,7 @@ export const postgresStore: LeadStore = {
 
   async stats() {
     const sql = db();
-    const [[totals], statusRows, orgRows, eventRows, monthRows] = await Promise.all([
+    const [[totals], statusRows, orgRows, eventRows, monthRows, followUpsDue] = await Promise.all([
       sql<{ total: number; last30: number; failed: number }[]>`
         select count(*)::int as total,
                (count(*) filter (where created_at >= now() - interval '30 days'))::int as last30,
@@ -252,6 +348,16 @@ export const postgresStore: LeadStore = {
         select months.month, coalesce(counts.n, 0)::int as n
         from months left join counts using (month)
         order by months.month`,
+      // Same rule as the followUpDue filter. 0 until `npm run db:setup` adds the column.
+      sql<{ n: number }[]>`
+        select count(*)::int as n from leads
+        where status not in ('won', 'lost') and next_follow_up <= ${istToday()}::date`.then(
+        ([r]) => r?.n ?? 0,
+        (err) => {
+          if (pgCode(err) === "42703") return 0;
+          throw err;
+        },
+      ),
     ]);
 
     const byStatus = zeroByStatus();
@@ -269,8 +375,9 @@ export const postgresStore: LeadStore = {
         ? monthRows.map((r) => ({ month: r.month, count: r.n }))
         : last12Months().map((month) => ({ month, count: monthRows.find((r) => r.month === month)?.n ?? 0 }));
 
+    const total = totals?.total ?? 0;
     return {
-      total: totals?.total ?? 0,
+      total,
       last30Days: totals?.last30 ?? 0,
       byStatus,
       byOrgType,
@@ -279,6 +386,11 @@ export const postgresStore: LeadStore = {
       won: byStatus.won,
       lost: byStatus.lost,
       notifyFailed: totals?.failed ?? 0,
+      open: total - byStatus.won - byStatus.lost,
+      meetings: byStatus.meeting,
+      proposals: byStatus.proposal,
+      newLeads: byStatus.new,
+      followUpsDue,
     };
   },
 
@@ -342,7 +454,9 @@ export const postgresStore: LeadStore = {
     const sql = db();
     const rows = await sql<ActivityRow[]>`
       select * from admin_activity
-      ${opts.leadId ? sql`where lead_id = ${opts.leadId}` : sql``}
+      where true
+        ${opts.leadId ? sql`and lead_id = ${opts.leadId}` : sql``}
+        ${opts.action ? sql`and action = ${opts.action}` : sql``}
       order by at desc
       limit ${activityLimit(opts.limit)}`;
     return rows.map(toActivity);
@@ -404,6 +518,21 @@ export const postgresStore: LeadStore = {
       if (pgCode(err) === "42P01") return 0;
       throw err;
     }
+  },
+
+  async disableAdminIfNotLast(id) {
+    if (!UUID.test(id)) return "missing";
+    return db().begin(async (tx) => {
+      // Serialises concurrent disables, so two can't both pass the "more than one active" check.
+      await tx`select pg_advisory_xact_lock(hashtext('ds:admins:disable'))`;
+      const [row] = await tx<{ disabled: boolean }[]>`select disabled from admins where id = ${id}`;
+      if (!row) return "missing" as const;
+      if (row.disabled) return "disabled" as const;
+      const [active] = await tx<{ n: number }[]>`select count(*)::int as n from admins where not disabled`;
+      if ((active?.n ?? 0) <= 1) return "last" as const;
+      await tx`update admins set disabled = true where id = ${id}`;
+      return "disabled" as const;
+    });
   },
 
   async recordLoginFailure(key) {

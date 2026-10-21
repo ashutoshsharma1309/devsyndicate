@@ -8,7 +8,20 @@ import { ButtonLink } from "@/components/ui/button";
 import { nav, primaryCta, site } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
-export function Navbar() {
+/** What the mobile menu shows under its call to action. Server parents pass the published details. */
+export type NavbarContact = { email: string; name: string; phone: { display: string; href: string } };
+
+const staticContact: NavbarContact = {
+  email: site.email,
+  name: site.primaryContact.name,
+  phone: { display: site.primaryContact.phone.display, href: site.primaryContact.phone.href },
+};
+
+/**
+ * `contact` comes from published content (app/(site)/layout.tsx). Without it
+ * (the client-side error boundary) the site's built-in details are shown.
+ */
+export function Navbar({ contact = staticContact }: { contact?: NavbarContact }) {
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [open, setOpen] = useState(false);
@@ -193,12 +206,12 @@ export function Navbar() {
               {primaryCta.label}
             </ButtonLink>
             <div className="mt-6 space-y-1 text-sm text-mute-dark">
-              <a className="block py-1 hover:text-white" href={`mailto:${site.email}`}>
-                {site.email}
+              <a className="block py-1 hover:text-white" href={`mailto:${contact.email}`}>
+                {contact.email}
               </a>
-              <a className="block py-1 hover:text-white" href={site.primaryContact.phone.href}>
-                {site.primaryContact.phone.display}
-                <span> · {site.primaryContact.name}</span>
+              <a className="block py-1 hover:text-white" href={contact.phone.href}>
+                {contact.phone.display}
+                <span> · {contact.name}</span>
               </a>
             </div>
           </div>
